@@ -5,7 +5,8 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import request from 'supertest';
-import { app, setCustomGenAIClient, resetCustomGenAIClient } from './app.ts';
+import { app, getGenAIClient, setCustomGenAIClient, resetCustomGenAIClient } from './app.ts';
+import { callGeminiAndValidate, clearGeminiCache } from './gemini.ts';
 
 const VALID_MOCK_PLAN = {
   title: "Sister's Retro Bollywood Sangeet",
@@ -57,6 +58,80 @@ describe('server/api.test.ts', () => {
     vi.restoreAllMocks();
   });
 
+  it('tries configured Gemini models in order and returns model metadata', async () => {
+    const previousModels = process.env.GEMINI_MODEL;
+    process.env.GEMINI_MODEL = 'gemini-first,gemini-second';
+    const calls: string[] = [];
+    setCustomGenAIClient({
+      models: {
+        generateContent: vi.fn().mockImplementation(({ model }: { model?: string }) => {
+          calls.push(model || '');
+          if (model === 'gemini-first') return Promise.reject(new Error('model unavailable'));
+          return Promise.resolve({ text: JSON.stringify(VALID_MOCK_PLAN) });
+        }),
+      },
+    });
+
+    try {
+      const result = await callGeminiAndValidate(getGenAIClient(), 'model-order-test', 1000);
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.model).toBe('gemini-second');
+        expect(calls).toEqual(['gemini-first', 'gemini-second']);
+      }
+    } finally {
+      if (previousModels === undefined) delete process.env.GEMINI_MODEL;
+      else process.env.GEMINI_MODEL = previousModels;
+    }
+  });
+
+  it('aborts a slow mocked model within the timeout', async () => {
+    let aborted = false;
+    setCustomGenAIClient({
+      models: {
+        generateContent: vi.fn().mockImplementation(({ signal }: { signal?: AbortSignal }) => new Promise((_resolve, reject) => {
+          signal?.addEventListener('abort', () => {
+            aborted = true;
+            reject(new DOMException('The operation was aborted', 'AbortError'));
+          }, { once: true });
+        })),
+      },
+    });
+
+    const result = await callGeminiAndValidate(getGenAIClient(), 'abort-test', 20);
+    expect(result).toEqual({ success: false, reason: 'timeout' });
+    expect(aborted).toBe(true);
+  });
+
+  it('uses the in-memory cache on repeated successful calls', async () => {
+    clearGeminiCache();
+    const generateContent = vi.fn().mockResolvedValue({ text: JSON.stringify(VALID_MOCK_PLAN) });
+    setCustomGenAIClient({ models: { generateContent } });
+    const first = await callGeminiAndValidate(getGenAIClient(), 'cache-test', 1000);
+    const second = await callGeminiAndValidate(getGenAIClient(), 'cache-test', 1000);
+    expect(first.success).toBe(true);
+    expect(second.success).toBe(true);
+    expect(generateContent).toHaveBeenCalledTimes(1);
+  });
+
+  it('offline mode skips model calls and returns a starter plan', async () => {
+    const previousOffline = process.env.UTSAV_AI_OFFLINE;
+    const generateContent = vi.fn();
+    process.env.UTSAV_AI_OFFLINE = '1';
+    setCustomGenAIClient({ models: { generateContent } });
+    try {
+      const res = await request(app)
+        .post('/api/plan')
+        .send({ brief: 'Birthday, 20 guests' });
+      expect(res.status).toBe(200);
+      expect(res.body.source).toBe('starter');
+      expect(generateContent).not.toHaveBeenCalled();
+    } finally {
+      if (previousOffline === undefined) delete process.env.UTSAV_AI_OFFLINE;
+      else process.env.UTSAV_AI_OFFLINE = previousOffline;
+    }
+  });
+
   it('valid brief returns 200 with source "gemini"', async () => {
     setCustomGenAIClient({
       models: {
@@ -75,6 +150,87 @@ describe('server/api.test.ts', () => {
     expect(res.body.plan).toBeDefined();
     expect(res.body.plan.title).toBe("Sister's Retro Bollywood Sangeet");
     expect(res.body.plan.guests).toBe(150);
+  });
+
+  it('uses Groq when a Groq key is configured and Gemini is unavailable', async () => {
+    const previousGeminiKey = process.env.GEMINI_API_KEY;
+    const previousGroqKey = process.env.GROQ_API_KEY;
+    process.env.GEMINI_API_KEY = '';
+    process.env.GROQ_API_KEY = 'test-groq-key';
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: JSON.stringify(VALID_MOCK_PLAN) } }],
+      }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    try {
+      const res = await request(app)
+        .post('/api/plan')
+        .send({ brief: "Sister's sangeet, 150 guests, ₹6L, 14 Dec, Vizag" });
+
+      expect(res.status).toBe(200);
+      expect(res.body.source).toBe('groq');
+      expect(res.body.plan.title).toBe("Sister's Retro Bollywood Sangeet");
+      expect(fetchMock).toHaveBeenCalledWith(
+        'https://api.groq.com/openai/v1/chat/completions',
+        expect.objectContaining({ method: 'POST' })
+      );
+    } finally {
+      vi.unstubAllGlobals();
+      if (previousGeminiKey === undefined) delete process.env.GEMINI_API_KEY;
+      else process.env.GEMINI_API_KEY = previousGeminiKey;
+      if (previousGroqKey === undefined) delete process.env.GROQ_API_KEY;
+      else process.env.GROQ_API_KEY = previousGroqKey;
+    }
+  });
+
+  it('uses Groq-compatible lowercase tool schemas for Co-planner calls', async () => {
+    const previousGeminiKey = process.env.GEMINI_API_KEY;
+    const previousGroqKey = process.env.GROQ_API_KEY;
+    process.env.GEMINI_API_KEY = '';
+    process.env.GROQ_API_KEY = 'test-groq-key';
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [{
+          message: {
+            content: '',
+            tool_calls: [{
+              function: {
+                name: 'moveBudget',
+                arguments: JSON.stringify({
+                  op: 'moveBudget',
+                  from: 'Venue & Stage Decor',
+                  to: 'Catering & Hospitality',
+                  amount: 20000,
+                }),
+              },
+            }],
+          },
+        }],
+      }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    try {
+      const res = await request(app)
+        .post('/api/chat')
+        .send({ message: 'Move ₹20,000 from decor to catering', plan: VALID_MOCK_PLAN, history: [] });
+
+      expect(res.status).toBe(200);
+      expect(res.body.proposals).toHaveLength(1);
+      const requestBody = JSON.parse(fetchMock.mock.calls[0][1].body);
+      expect(requestBody.tools[0].function.parameters.type).toBe('object');
+      expect(requestBody.tools[0].function.parameters.properties.amount.type).toBe('integer');
+    } finally {
+      vi.unstubAllGlobals();
+      if (previousGeminiKey === undefined) delete process.env.GEMINI_API_KEY;
+      else process.env.GEMINI_API_KEY = previousGeminiKey;
+      if (previousGroqKey === undefined) delete process.env.GROQ_API_KEY;
+      else process.env.GROQ_API_KEY = previousGroqKey;
+    }
   });
 
   it('empty brief returns 400', async () => {
@@ -109,7 +265,7 @@ describe('server/api.test.ts', () => {
     expect(res.body.error).toBe('Invalid request payload');
   });
 
-  it('Gemini timeout returns source "fallback-timeout"', async () => {
+  it('Gemini timeout returns a starter plan', async () => {
     const prevTimeout = process.env.GEMINI_TIMEOUT_MS;
     process.env.GEMINI_TIMEOUT_MS = '25'; // Fast 25ms timeout for testing
 
@@ -127,7 +283,7 @@ describe('server/api.test.ts', () => {
         .send({ brief: "Sister's sangeet, 150 guests, ₹6L, 14 Dec, Vizag" });
 
       expect(res.status).toBe(200);
-      expect(res.body.source).toBe('fallback-timeout');
+      expect(res.body.source).toBe('starter');
       expect(res.body.plan).toBeDefined();
       expect(res.body.plan.guests).toBe(150);
     } finally {
@@ -153,7 +309,7 @@ describe('server/api.test.ts', () => {
       .send({ brief: "Sister's sangeet, 150 guests, ₹6L, 14 Dec, Vizag" });
 
     expect(res.status).toBe(200);
-    expect(res.body.source).toBe('fallback-error');
+    expect(res.body.source).toBe('starter');
     expect(res.body.plan).toBeDefined();
     expect(res.body.plan.guests).toBe(150);
     expect(res.body.plan.city).toBe('Vizag');
@@ -165,6 +321,44 @@ describe('server/api.test.ts', () => {
     expect(res.body.status).toBe('ok');
     expect(res.body.service).toBe('utsav-event-planner');
     expect(res.body.timestamp).toBeDefined();
+  });
+
+  it('POST /api/chat returns only safe, plan-valid tool proposals', async () => {
+    setCustomGenAIClient({
+      models: {
+        generateContent: vi.fn().mockResolvedValue({
+          text: 'I found one safe change.',
+          functionCalls: [
+            { name: 'moveBudget', args: { from: 'Venue & Stage Decor', to: 'Catering & Hospitality', amount: 10000 } },
+            { name: 'unknownOperation', args: {} },
+            { name: 'moveBudget', args: { from: 'Missing', to: 'Catering & Hospitality', amount: 10000 } },
+            { name: 'moveBudget', args: { from: 'Venue & Stage Decor', to: 'Catering & Hospitality', amount: 999999999 } },
+          ],
+        }),
+      },
+    });
+
+    const res = await request(app)
+      .post('/api/chat')
+      .send({
+        message: 'Please adjust the budget',
+        plan: VALID_MOCK_PLAN,
+        history: [],
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.reply).toContain('one safe');
+    expect(res.body.proposals).toEqual([
+      { op: 'moveBudget', from: 'Venue & Stage Decor', to: 'Catering & Hospitality', amount: 10000 },
+    ]);
+  });
+
+  it('POST /api/chat rejects oversized messages and never saves a plan', async () => {
+    const res = await request(app)
+      .post('/api/chat')
+      .send({ message: 'x'.repeat(301), plan: VALID_MOCK_PLAN, history: [] });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Invalid chat request');
   });
 
   it('POST /api/replan returns 200 with source "gemini" and patch for valid PlanPatch', async () => {
@@ -258,6 +452,7 @@ describe('server/api.test.ts', () => {
     expect(raw).toContain('"section":"ideas"');
     expect(raw).toContain('"section":"risks"');
     expect(raw).toContain('"section":"done"');
+    expect(raw).toContain('"source":"starter"');
   });
 
   it('POST /api/plan/stream returns 400 for empty brief', async () => {
@@ -330,6 +525,49 @@ describe('server/api.test.ts', () => {
     expect(res.headers['content-type']).toContain('text/event-stream');
     expect(res.text).toContain('Sister Sangeet Streamed');
     expect(res.text).toContain('Book Venue');
+    expect(res.text).toContain('"source":"gemini"');
     expect(res.text).toContain('"section":"done"');
+  });
+
+  it('POST /api/generate-image generates concept visual and validates input', async () => {
+    // Valid request
+    const res = await request(app)
+      .post('/api/generate-image')
+      .send({
+        prompt: 'Marigold entrance arch with brass lamps',
+        theme: "Sister's Sangeet",
+        category: 'decor',
+        aspectRatio: '16:9',
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.imageUrl).toBeDefined();
+    expect(res.body.imageUrl).toMatch(/^data:image\//);
+    expect(res.body.prompt).toBe('Marigold entrance arch with brass lamps');
+    expect(['imagen', 'curated']).toContain(res.body.source);
+
+    // Invalid request (missing prompt)
+    const invalidRes = await request(app)
+      .post('/api/generate-image')
+      .send({ prompt: '' });
+
+    expect(invalidRes.status).toBe(400);
+    expect(invalidRes.body.error).toBe('Invalid image generation request');
+  });
+
+  it('POST /api/tts prepares clean spoken text and voice hints', async () => {
+    const res = await request(app)
+      .post('/api/tts')
+      .send({
+        text: '### Sangeet Notice\n**Great!** We booked the hall for ₹90,000.',
+        language: 'hi',
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('ready');
+    expect(res.body.voiceHint).toBe('hi-IN');
+    expect(res.body.text).not.toContain('###');
+    expect(res.body.text).not.toContain('**');
+    expect(res.body.text).toContain('Great! We booked the hall');
   });
 });

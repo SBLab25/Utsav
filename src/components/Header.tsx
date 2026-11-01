@@ -14,9 +14,18 @@ import {
   Users,
   MapPin,
   Download,
-  Upload
+  Upload,
+  Sparkles,
+  Cloud,
+  CloudUpload,
+  Check,
+  LogIn,
+  LogOut,
+  ChevronDown,
+  User,
 } from 'lucide-react';
 import { EventPlan } from '../types/plan.ts';
+import type { UserProfile, CloudPlanDoc, CloudSyncStatus } from '../types/auth.ts';
 import { generateGoogleCalendarUrl, generateWhatsAppSummary } from '../utils/planLogic.ts';
 import { createShareUrl } from '../utils/sharePlan.ts';
 
@@ -30,6 +39,15 @@ interface HeaderProps {
   readOnly?: boolean;
   language?: 'en' | 'hi' | 'te' | 'bn';
   onLanguageChange?: (language: 'en' | 'hi' | 'te' | 'bn') => void;
+  onOpenInvitationDesigner?: () => void;
+  user?: UserProfile | null;
+  cloudSyncStatus?: CloudSyncStatus;
+  activeCloudPlan?: CloudPlanDoc | null;
+  onOpenAuth?: () => void;
+  onSignOut?: () => void;
+  onOpenCloudPlans?: () => void;
+  onOpenCollaborators?: () => void;
+  onSaveToCloud?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -42,10 +60,31 @@ export const Header: React.FC<HeaderProps> = ({
   readOnly = false,
   language = 'en',
   onLanguageChange = () => {},
+  onOpenInvitationDesigner,
+  user = null,
+  cloudSyncStatus = 'idle',
+  activeCloudPlan = null,
+  onOpenAuth = () => {},
+  onSignOut = () => {},
+  onOpenCloudPlans = () => {},
+  onOpenCollaborators = () => {},
+  onSaveToCloud = () => {},
 }) => {
   const [copiedShare, setCopiedShare] = React.useState(false);
   const [copiedLink, setCopiedLink] = React.useState(false);
+  const [userMenuOpen, setUserMenuOpen] = React.useState(false);
+  const userMenuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  React.useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) {
+        setUserMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const handleShareWhatsApp = () => {
     if (!plan) return;
@@ -116,7 +155,7 @@ export const Header: React.FC<HeaderProps> = ({
 
   return (
     <header className="sticky top-0 z-40 bg-[#FFF8EE]/90 dark:bg-[#180D1F]/90 backdrop-blur-md border-b border-stone-200/80 dark:border-stone-800 transition-colors no-print">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
+      <div className="max-w-[1800px] 2xl:max-w-[1920px] mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
         {/* Zone 1: Brand Wordmark */}
         <div className="flex items-center gap-3 shrink-0">
           <a
@@ -241,12 +280,25 @@ export const Header: React.FC<HeaderProps> = ({
               <button
                 onClick={handlePrint}
                 className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-700 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-800 transition-colors cursor-pointer"
-                title="Print celebration plan view"
-                aria-label="Print celebration plan view"
+                title="Print celebration plan view or save as PDF"
+                aria-label="Print celebration plan view or save as PDF"
               >
                 <Printer className="w-3.5 h-3.5" />
-                <span>Print or save as PDF</span>
+                <span>Print / PDF</span>
               </button>
+
+              {/* Invitation Card */}
+              {onOpenInvitationDesigner && (
+                <button
+                  onClick={onOpenInvitationDesigner}
+                  className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-[#B45309] dark:text-[#F5A623] border border-amber-500/30 transition-colors cursor-pointer"
+                  title="Design cultural invitation card & download printable cards"
+                  aria-label="Design cultural invitation card"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Invite Card</span>
+                </button>
+              )}
 
               {/* History Drawer Toggle */}
               <button
@@ -288,6 +340,127 @@ export const Header: React.FC<HeaderProps> = ({
               </>
               )}
             </>
+          )}
+
+          {/* Cloud Sync / Save Action */}
+          {plan && !readOnly && (
+            <button
+              onClick={user ? onSaveToCloud : onOpenAuth}
+              disabled={cloudSyncStatus === 'syncing'}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl border transition-all cursor-pointer ${
+                activeCloudPlan
+                  ? 'bg-rose-50 dark:bg-rose-950/30 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-900 hover:bg-rose-100'
+                  : 'bg-gradient-to-r from-amber-600 to-rose-600 hover:from-amber-700 hover:to-rose-700 text-white border-transparent shadow-xs'
+              }`}
+              title={activeCloudPlan ? 'Sync latest changes to Cloud' : 'Save this plan to Utsav Cloud'}
+              aria-label={activeCloudPlan ? 'Sync plan to Cloud' : 'Save plan to Cloud'}
+            >
+              {cloudSyncStatus === 'syncing' ? (
+                <>
+                  <Cloud className="w-3.5 h-3.5 animate-bounce" />
+                  <span className="hidden sm:inline">Syncing...</span>
+                </>
+              ) : activeCloudPlan ? (
+                <>
+                  <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                  <span className="hidden sm:inline">Cloud Synced</span>
+                </>
+              ) : (
+                <>
+                  <CloudUpload className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Save to Cloud</span>
+                </>
+              )}
+            </button>
+          )}
+
+          {/* Active Collaborators Pill */}
+          {activeCloudPlan && (
+            <button
+              onClick={onOpenCollaborators}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-900 hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-colors cursor-pointer"
+              title="Manage live plan collaborators"
+              aria-label={`Manage collaborators, ${activeCloudPlan.collaborators.length} active`}
+            >
+              <Users className="w-3.5 h-3.5 text-amber-600" />
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              </span>
+              <span className="hidden md:inline">{activeCloudPlan.collaborators.length}</span>
+            </button>
+          )}
+
+          {/* User Profile / Auth Button */}
+          {user ? (
+            <div className="relative" ref={userMenuRef}>
+              <button
+                onClick={() => setUserMenuOpen((prev) => !prev)}
+                className="inline-flex items-center gap-1.5 p-1.5 text-xs font-semibold rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-700 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-800 transition-colors cursor-pointer"
+                aria-expanded={userMenuOpen}
+                aria-haspopup="true"
+                aria-label={`User menu for ${user.displayName || user.email}`}
+              >
+                {user.photoURL ? (
+                  <img src={user.photoURL} alt="" className="w-5 h-5 rounded-full object-cover" />
+                ) : (
+                  <div className="w-5 h-5 rounded-full bg-gradient-to-tr from-rose-500 to-amber-500 text-white text-[10px] flex items-center justify-center font-bold">
+                    {(user.displayName || user.email || 'U').charAt(0).toUpperCase()}
+                  </div>
+                )}
+                <span className="hidden md:inline max-w-[90px] truncate">
+                  {user.displayName || user.email?.split('@')[0]}
+                </span>
+                <ChevronDown className="w-3 h-3 text-stone-400" />
+              </button>
+
+              {userMenuOpen && (
+                <div
+                  className="absolute right-0 mt-2 w-56 bg-white dark:bg-stone-900 rounded-2xl shadow-xl border border-stone-200 dark:border-stone-800 py-2 z-50 animate-fade-in"
+                  role="menu"
+                >
+                  <div className="px-4 py-2 border-b border-stone-100 dark:border-stone-800">
+                    <p className="text-xs font-semibold text-stone-900 dark:text-stone-100 truncate">
+                      {user.displayName || 'Celebration Host'}
+                    </p>
+                    <p className="text-[11px] text-stone-500 truncate">{user.email}</p>
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      setUserMenuOpen(false);
+                      onOpenCloudPlans();
+                    }}
+                    className="w-full text-left px-4 py-2 text-xs text-stone-700 dark:text-stone-300 hover:bg-rose-50 dark:hover:bg-rose-950/30 flex items-center gap-2"
+                    role="menuitem"
+                  >
+                    <Cloud className="w-3.5 h-3.5 text-rose-600" />
+                    My Cloud Celebrations
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setUserMenuOpen(false);
+                      onSignOut();
+                    }}
+                    className="w-full text-left px-4 py-2 text-xs text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 flex items-center gap-2 border-t border-stone-100 dark:border-stone-800"
+                    role="menuitem"
+                  >
+                    <LogOut className="w-3.5 h-3.5" />
+                    Sign Out
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <button
+              onClick={onOpenAuth}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl bg-stone-900 dark:bg-white text-white dark:text-stone-900 hover:bg-stone-800 dark:hover:bg-stone-100 transition-colors shadow-xs cursor-pointer"
+              aria-label="Sign in to your Utsav account"
+            >
+              <LogIn className="w-3.5 h-3.5" />
+              <span>Sign In</span>
+            </button>
           )}
 
           {/* Dark Mode Toggle */}

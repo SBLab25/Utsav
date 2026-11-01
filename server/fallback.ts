@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type { EventPlan, BudgetItem, TimelineTask, VendorRequirement, IdeaItem, RiskItem } from '../src/types/plan.ts';
+import type { EventPlan, BudgetItem, TimelineTask, VendorRequirement, IdeaItem, RiskItem, EventDay, VendorQuote, RunSheetItem } from '../src/types/plan.ts';
 
 /**
  * Parses budget amount from brief text looking for currency markers or explicit units (L, lakh, k, cr).
@@ -112,11 +112,7 @@ export function parseEventDate(text: string, referenceDate: Date = new Date()): 
     return `${chosenYear}-${mStr}-${dStr}`;
   }
 
-  const fallback = new Date(referenceDate.getTime() + 45 * 24 * 60 * 60 * 1000);
-  const fYear = fallback.getFullYear();
-  const fMonth = String(fallback.getMonth() + 1).padStart(2, '0');
-  const fDay = String(fallback.getDate()).padStart(2, '0');
-  return `${fYear}-${fMonth}-${fDay}`;
+  return 'Date to confirm';
 }
 
 /**
@@ -216,7 +212,7 @@ export function generateDefaultPlan(brief: string, referenceDate: Date = new Dat
     'Vizag', 'Goa', 'Delhi', 'Jaipur', 'Bengaluru', 'Mumbai', 'Pune', 'Hyderabad',
     'Chennai', 'Kolkata', 'Udaipur', 'Ahmedabad', 'Chandigarh', 'Indore', 'Lucknow'
   ];
-  let city = 'Delhi NCR';
+  let city = 'Location to confirm';
   for (const c of knownCities) {
     if (new RegExp(`\\b${c}\\b`, 'i').test(text)) {
       city = c;
@@ -228,7 +224,7 @@ export function generateDefaultPlan(brief: string, referenceDate: Date = new Dat
   const event_date = parseEventDate(text, referenceDate);
 
   // 6. Extract Theme strictly from brief keywords, or use generic celebration theme
-  let theme = 'Celebration & Festivities';
+  let theme = 'Theme to confirm';
   if (/retro\s*bollywood/i.test(textLower)) theme = 'Retro Bollywood';
   else if (/bollywood/i.test(textLower)) theme = 'Bollywood Glamour';
   else if (/eco-friendly|sustainable|green/i.test(textLower)) theme = 'Eco-Friendly & Sustainable';
@@ -250,6 +246,44 @@ export function generateDefaultPlan(brief: string, referenceDate: Date = new Dat
   // 8. Generic Categories per Event Type
   const budget = getGenericBudgetCategories(eventType);
 
+  const isMultiDayOrWedding = eventType === 'wedding' || eventType === 'sangeet' || /multi-day|3-day|2-day|haldi|sangeet|reception|fest/i.test(text);
+
+  const event_days: EventDay[] | undefined = isMultiDayOrWedding ? [
+    {
+      id: 'day-1',
+      day_number: 1,
+      title: 'Day 1: Haldi & Mehendi Soirée',
+      date: event_date,
+      time_slot: 'Morning 10:30 AM – 2:30 PM',
+      venue: `${city} Courtyard & Garden`,
+      budget_allocated: Math.round(total_budget * 0.25),
+      dress_code: 'Vibrant Yellows, Marigolds & Floral Prints',
+      notes: 'Intimate family rituals, live dholki, floral jewelry and mehendi artists.',
+    },
+    {
+      id: 'day-2',
+      day_number: 2,
+      title: 'Day 2: Sangeet & Musical Night',
+      date: event_date,
+      time_slot: 'Evening 6:30 PM – 11:30 PM',
+      venue: `${city} Grand Ballroom`,
+      budget_allocated: Math.round(total_budget * 0.35),
+      dress_code: 'Glamorous Evening Lehengas, Tuxedos & Indo-Western',
+      notes: 'Choreographed dance performances, DJ console, sound rig, and live street chaat counters.',
+    },
+    {
+      id: 'day-3',
+      day_number: 3,
+      title: 'Day 3: Main Muhurtham & Royal Reception',
+      date: event_date,
+      time_slot: 'Morning 9:00 AM (Ceremony) & 7:00 PM (Reception)',
+      venue: `${city} Heritage Lawn & Banquet`,
+      budget_allocated: Math.round(total_budget * 0.40),
+      dress_code: 'Traditional Kanjeevarams, Royal Plum & Sherwanis',
+      notes: 'Pheras, live classical shehnai, royal multi-course feast, and family portraits.',
+    },
+  ] : undefined;
+
   // 9. Generic Milestone Timeline
   const timeline: TimelineTask[] = [
     { t_minus_days: 90, title: `Confirm Venue & Dates in ${city}`, owner: 'Lead Organizer', done: false },
@@ -257,7 +291,13 @@ export function generateDefaultPlan(brief: string, referenceDate: Date = new Dat
     { t_minus_days: 30, title: `Book Audio-Visual & Entertainment Setup`, owner: 'Entertainment Lead', done: false },
     { t_minus_days: 15, title: `Review ${theme} Theme Decor & Lighting Layout`, owner: 'Decor Team', done: false },
     { t_minus_days: 7, title: `Conduct Final Vendor Walkthrough & Rehearsals`, owner: 'Core Team', done: false },
-    { t_minus_days: 0, title: `Event Day Coordination & Hospitality Welcome`, owner: 'Event Leads', done: false },
+    ...(isMultiDayOrWedding ? [
+      { t_minus_days: 0, title: `Day 1: Haldi & Mehendi Rituals & Setup`, owner: 'Bridal Squad', done: false, day_number: 1, time_slot: '10:30 AM' },
+      { t_minus_days: 0, title: `Day 2: Sangeet Sound Rig & Dance Performances`, owner: 'Choreographer & DJ', done: false, day_number: 2, time_slot: '6:30 PM' },
+      { t_minus_days: 0, title: `Day 3: Grand Ceremony & Reception Banquet`, owner: 'Family Heads', done: false, day_number: 3, time_slot: '9:00 AM' },
+    ] : [
+      { t_minus_days: 0, title: `Event Day Coordination & Hospitality Welcome`, owner: 'Event Leads', done: false, day_number: 1, time_slot: 'Morning' },
+    ]),
   ];
 
   // 10. Generic Vendors
@@ -275,6 +315,31 @@ export function generateDefaultPlan(brief: string, referenceDate: Date = new Dat
         'No dedicated venue coordinator on-site during the event',
       ],
       outreach_message: `Hello! We are organizing a ${guests}-guest ${eventType} in ${city} on ${event_date} with a ${theme} theme. Please share your availability and decor packages.`,
+      status: 'shortlisted',
+      quotes: [
+        {
+          id: 'quote-v1',
+          vendor_name: `${city} Royal Heritage Decorators`,
+          contact_person: 'Rajesh Sharma',
+          phone_or_email: '+91 98480 12345',
+          quote_amount: Math.round(total_budget * 0.32),
+          inclusions: ['Grand Entryway Arch', 'Mandap / Stage Backdrop', 'Ambient LED Par Cans', 'Fresh Marigold Hangings'],
+          status: 'shortlisted',
+          rating: 4.8,
+          notes: 'Includes 6 hours setup window and on-site supervisor throughout.',
+        },
+        {
+          id: 'quote-v2',
+          vendor_name: 'Utsav Elite Productions',
+          contact_person: 'Pooja Verma',
+          phone_or_email: '+91 98111 67890',
+          quote_amount: Math.round(total_budget * 0.38),
+          inclusions: ['Fiber-optic Stage Lights', 'Custom Floral Wall', 'Entrance Carpet', 'VIP Lounge Sofas'],
+          status: 'received',
+          rating: 4.5,
+          notes: 'Higher tier finishes with soundproofing draping included.',
+        },
+      ],
     },
     {
       type: 'Catering & Beverages',
@@ -289,6 +354,32 @@ export function generateDefaultPlan(brief: string, referenceDate: Date = new Dat
         'Unclear staff-to-guest serving ratio',
       ],
       outreach_message: `Hi! We require catering services for ${guests} guests on ${event_date} in ${city}. Please share your sample menus and per-plate pricing options.`,
+      status: 'booked',
+      quote: Math.round(total_budget * 0.28),
+      quotes: [
+        {
+          id: 'quote-c1',
+          vendor_name: 'Annapurna Gourmet Caterers',
+          contact_person: 'Chef Vikram Rao',
+          phone_or_email: '+91 98220 54321',
+          quote_amount: Math.round(total_budget * 0.28),
+          inclusions: ['5 Live Food Stations', '3 Welcome Mocktails', 'North & South Indian Buffet', 'Artisan Dessert Bar'],
+          status: 'selected',
+          rating: 4.9,
+          notes: 'Includes 1:10 steward-to-guest ratio and complimentary food tasting session.',
+        },
+        {
+          id: 'quote-c2',
+          vendor_name: 'Silver Spoon Banquets',
+          contact_person: 'Sunil Kapoor',
+          phone_or_email: '+91 98330 98765',
+          quote_amount: Math.round(total_budget * 0.33),
+          inclusions: ['Gourmet Live Chaat', 'Continental Grazing Table', 'Royal Mughlai Mains', 'Kulfi Trolley'],
+          status: 'received',
+          rating: 4.6,
+          notes: 'High-end cutlery and ceramic setup included.',
+        },
+      ],
     },
     {
       type: 'Sound, DJ & AV Production',
@@ -303,6 +394,20 @@ export function generateDefaultPlan(brief: string, referenceDate: Date = new Dat
         'Inadequate speaker wattage for the venue scale',
       ],
       outreach_message: `Greetings! We are seeking an experienced audio-visual and sound partner for our celebration on ${event_date} in ${city} (${guests} attendees). Kindly provide equipment details and quotes.`,
+      status: 'todo',
+      quotes: [
+        {
+          id: 'quote-d1',
+          vendor_name: 'DJ Kabir & Beats Rig',
+          contact_person: 'Kabir Sound Tech',
+          phone_or_email: '+91 98765 43210',
+          quote_amount: Math.round(total_budget * 0.12),
+          inclusions: ['JBL VRX Line Array Sound Rig', 'Moving Head Beam Lights', '4 Wireless Shure Mics', 'Fog & Haze Machine'],
+          status: 'shortlisted',
+          rating: 4.7,
+          notes: 'Expert in retro Bollywood & modern Punjabi dance beats.',
+        },
+      ],
     },
   ];
 
@@ -337,6 +442,7 @@ export function generateDefaultPlan(brief: string, referenceDate: Date = new Dat
 
   // 12. Generic Risks & Mitigations
   const risks = generateDefaultRisks(eventType, city, total_budget, guests);
+  const runSheet = generateDefaultRunSheet(eventType);
 
   return {
     title,
@@ -346,13 +452,52 @@ export function generateDefaultPlan(brief: string, referenceDate: Date = new Dat
     total_budget,
     city,
     theme,
+    host_names: `${city} Hosts & Family`,
+    event_days,
     budget,
     timeline,
     vendors,
     ideas,
     risks,
+    runSheet,
+    payments: [],
     clarifying_question: null,
   };
+}
+
+/**
+ * Generates an event-day run sheet (6-15 time-ordered items)
+ */
+export function generateDefaultRunSheet(eventType?: string): RunSheetItem[] {
+  const type = (eventType || '').toLowerCase();
+  const isSangeet = type.includes('sangeet') || type.includes('dance') || type.includes('music');
+
+  if (isSangeet) {
+    return [
+      { id: 'rs-1', time: '14:00', title: 'AV & Sound Setup with DJ Tech Lead', owner: 'DJ Team' },
+      { id: 'rs-2', time: '16:00', title: 'Lighting & Stage Backdrop Final Check', owner: 'Decorator' },
+      { id: 'rs-3', time: '17:30', title: 'Family Dance Soundcheck & MC Walkthrough', owner: 'Choreographer' },
+      { id: 'rs-4', time: '18:30', title: 'Welcome Drinks & Live Chaat Counter Opens', owner: 'Catering Lead' },
+      { id: 'rs-5', time: '19:30', title: 'Guest Seating & Emcee Welcome Address', owner: 'Emcee' },
+      { id: 'rs-6', time: '20:00', title: 'Family Choreographed Performances & Dance Battles', owner: 'Family Host' },
+      { id: 'rs-7', time: '21:30', title: 'Grand Dinner Buffet Served', owner: 'Head Chef' },
+      { id: 'rs-8', time: '22:30', title: 'Open Dance Floor & Celebration Beats', owner: 'DJ Team' },
+      { id: 'rs-9', time: '23:45', title: 'Wrap-up & Vendor Settlement Sign-off', owner: 'Event Coordinator' },
+    ];
+  }
+
+  return [
+    { id: 'rs-1', time: '08:00', title: 'Vendor Entry & Setup Commences', owner: 'Venue Manager' },
+    { id: 'rs-2', time: '10:00', title: 'Stage, AV & Seating Inspection', owner: 'Event Coordinator' },
+    { id: 'rs-3', time: '11:30', title: 'Core Family & VIP Arrival Briefing', owner: 'Family Host' },
+    { id: 'rs-4', time: '13:00', title: 'Welcome Lunch / Refreshments Service', owner: 'Catering Head' },
+    { id: 'rs-5', time: '16:30', title: 'Final Technical & Audio Checks', owner: 'AV Lead' },
+    { id: 'rs-6', time: '18:00', title: 'Guest Welcome Desk Opens', owner: 'Hospitality Team' },
+    { id: 'rs-7', time: '19:00', title: 'Main Celebration Ceremony & Speeches', owner: 'Emcee' },
+    { id: 'rs-8', time: '20:30', title: 'Dinner Buffet & Live Counters Open', owner: 'Catering Supervisor' },
+    { id: 'rs-9', time: '22:00', title: 'Celebratory Toasts & Cake Cutting', owner: 'Host Family' },
+    { id: 'rs-10', time: '23:00', title: 'Event Concludes & Logistics Teardown', owner: 'Event Coordinator' },
+  ];
 }
 
 /**
@@ -492,6 +637,31 @@ export function generateDefaultVendors(core: {
         'No dedicated venue coordinator on-site during the event',
       ],
       outreach_message: `Hello! We are organizing a ${guests}-guest ${eventType} in ${city} on ${event_date} with a ${theme} theme. Please share your availability and decor packages.`,
+      status: 'shortlisted',
+      quotes: [
+        {
+          id: 'quote-v1',
+          vendor_name: `${city} Royal Heritage Decorators`,
+          contact_person: 'Rajesh Sharma',
+          phone_or_email: '+91 98480 12345',
+          quote_amount: Math.round(total_budget * 0.32),
+          inclusions: ['Grand Entryway Arch', 'Mandap / Stage Backdrop', 'Ambient LED Par Cans', 'Fresh Marigold Hangings'],
+          status: 'shortlisted',
+          rating: 4.8,
+          notes: 'Includes 6 hours setup window and on-site supervisor throughout.',
+        },
+        {
+          id: 'quote-v2',
+          vendor_name: 'Utsav Elite Productions',
+          contact_person: 'Pooja Verma',
+          phone_or_email: '+91 98111 67890',
+          quote_amount: Math.round(total_budget * 0.38),
+          inclusions: ['Fiber-optic Stage Lights', 'Custom Floral Wall', 'Entrance Carpet', 'VIP Lounge Sofas'],
+          status: 'received',
+          rating: 4.5,
+          notes: 'Higher tier finishes with soundproofing draping included.',
+        },
+      ],
     },
     {
       type: 'Catering & Beverages',
@@ -506,6 +676,32 @@ export function generateDefaultVendors(core: {
         'Unclear staff-to-guest serving ratio',
       ],
       outreach_message: `Hi! We require catering services for ${guests} guests on ${event_date} in ${city}. Please share your sample menus and per-plate pricing options.`,
+      status: 'booked',
+      quote: Math.round(total_budget * 0.28),
+      quotes: [
+        {
+          id: 'quote-c1',
+          vendor_name: 'Annapurna Gourmet Caterers',
+          contact_person: 'Chef Vikram Rao',
+          phone_or_email: '+91 98220 54321',
+          quote_amount: Math.round(total_budget * 0.28),
+          inclusions: ['5 Live Food Stations', '3 Welcome Mocktails', 'North & South Indian Buffet', 'Artisan Dessert Bar'],
+          status: 'selected',
+          rating: 4.9,
+          notes: 'Includes 1:10 steward-to-guest ratio and complimentary food tasting session.',
+        },
+        {
+          id: 'quote-c2',
+          vendor_name: 'Silver Spoon Banquets',
+          contact_person: 'Sunil Kapoor',
+          phone_or_email: '+91 98330 98765',
+          quote_amount: Math.round(total_budget * 0.33),
+          inclusions: ['Gourmet Live Chaat', 'Continental Grazing Table', 'Royal Mughlai Mains', 'Kulfi Trolley'],
+          status: 'received',
+          rating: 4.6,
+          notes: 'High-end cutlery and ceramic setup included.',
+        },
+      ],
     },
     {
       type: 'Sound, DJ & AV Production',
@@ -520,6 +716,20 @@ export function generateDefaultVendors(core: {
         'Inadequate speaker wattage for the venue scale',
       ],
       outreach_message: `Greetings! We are seeking an experienced audio-visual and sound partner for our celebration on ${event_date} in ${city} (${guests} attendees). Kindly provide equipment details and quotes.`,
+      status: 'todo',
+      quotes: [
+        {
+          id: 'quote-d1',
+          vendor_name: 'DJ Kabir & Beats Rig',
+          contact_person: 'Kabir Sound Tech',
+          phone_or_email: '+91 98765 43210',
+          quote_amount: Math.round(total_budget * 0.12),
+          inclusions: ['JBL VRX Line Array Sound Rig', 'Moving Head Beam Lights', '4 Wireless Shure Mics', 'Fog & Haze Machine'],
+          status: 'shortlisted',
+          rating: 4.7,
+          notes: 'Expert in retro Bollywood & modern Punjabi dance beats.',
+        },
+      ],
     },
   ];
 }

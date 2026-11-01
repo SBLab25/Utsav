@@ -35,7 +35,8 @@ Whether planning a traditional multi-day Indian wedding with Sangeet and Haldi c
 5. **Living Re-Planning Engine** that recalculates the plan when constraints change ("add 50 guests", "reduce budget by ₹1L", "make it eco-friendly") while highlighting exactly what changed with visual diff chips.
 6. **Risk Radar** with likelihood-impact mapping, mitigations, backup plans, and timeline actions.
 7. **Guest management** with RSVP statuses, dietary summaries, CSV import/export, and headcount-linked re-planning.
-8. **Sharing and integrations** with privacy-safe compressed links, print/PDF output, Google Calendar, Google Maps, WhatsApp, and multilingual generated content.
+8. **Co-planner chat** with Gemini function calling, safe proposal validation, before/after previews, and explicit Apply or Discard approval.
+9. **Sharing and integrations** with privacy-safe compressed links, print/PDF output, Google Calendar, Google Maps, WhatsApp, and multilingual generated content.
 
 ---
 
@@ -59,6 +60,7 @@ Whether planning a traditional multi-day Indian wedding with Sangeet and Haldi c
 - **Vendor Negotiation Kits**: Pricing brackets categorized by tier-1 and tier-2 Indian cities, accompanied by specific vetting questions, vendor red flags, and ready-to-send outreach messages.
 - **Cultural Intelligence**: Distinct modules for multi-day weddings (Haldi, Mehendi, Sangeet choreography), community RWA festivals (permissions, volunteer rosters, sound curfews), and personal milestones.
 - **Signature Living Re-Planner**: Free-text change console computing explicit diffs (+₹12,000, moved to T-45, task added) with animated diff chips.
+- **Co-planner Chat**: Ask Gemini for budget, timeline, vendor, idea, guest, or total-budget changes. Every proposal is validated against the current plan and waits for explicit approval.
 - **Snapshot History**: In-browser version snapshots with instant restore, undo/redo, and JSON export/import.
 - **Theme "Confetti & Ink"**: Warm cream (`#FFF8EE`), royal plum (`#3B1F4A`), and marigold (`#F5A623`) with full dark mode support (`#180D1F`) and celebration confetti bursts.
 
@@ -75,9 +77,9 @@ graph TD
     subgraph Express Backend
         API --> Security[Helmet + Rate Limiting 30 req/15min + 100kb Cap]
         Security --> Sanitizer[Prompt Sanitizer & Injection Filter]
-        Sanitizer --> GeminiClient[Gemini Client /gemini-2.5-flash]
+        Sanitizer --> AIProviders[Gemini + Groq Provider Router]
         
-        GeminiClient -->|Structured JSON via responseSchema| LLM[(Google GenAI API)]
+        AIProviders -->|Structured JSON / tool calls| LLM[(Google Gemini or Groq API)]
         LLM -->|Candidate JSON Plan| Validator[Zod Schema Validator]
         
         Validator -->|Valid Plan| Response[Return Source: gemini]
@@ -109,7 +111,7 @@ Utsav uses **Gemini 2.5 Flash** (`gemini-2.5-flash`) via the modern `@google/gen
 1. **Structured Outputs (`responseSchema`)**: Enforces strict JSON schemas directly in the model call without requiring post-hoc parsing heuristics or markdown stripping.
 2. **Thinking Configuration**: Leverages low thinking level (`ThinkingLevel.LOW`) for fast planning latency while retaining nuanced cultural and geographical context.
 3. **Delimiter-Isolated Prompts**: User briefs and re-plan instructions are sanitized and enclosed within unambiguous boundary markers (`<<<USER_EVENT_BRIEF>>>` and `<<<USER_CHANGE_INSTRUCTION>>>`).
-4. **Resilient Retry & Fallback**: If Gemini times out (configurable via `GEMINI_TIMEOUT_MS`) or returns invalid JSON, the server automatically retries once before gracefully degrading to the deterministic rule-based parser in `server/fallback.ts`. The response explicitly flags its origin (`gemini`, `fallback-timeout`, `fallback-error`, or `fallback-nokey`).
+4. **Resilient Retry & Fallback**: Gemini models are tried in the comma-separated `GEMINI_MODEL` order within one overall `GEMINI_TIMEOUT_MS` budget. Transient 429/5xx failures receive one short retry, slow calls are aborted, and invalid responses are not retried. If every model fails, or `UTSAV_AI_OFFLINE=1`, Utsav returns a deterministic starter plan with source `starter`; successful responses include the selected model and attempt count.
 
 ---
 
@@ -132,9 +134,11 @@ Create a `.env` file from `.env.example`:
 ```bash
 cp .env.example .env
 ```
-Edit `.env`:
+Edit `.env` with at least one provider key:
 ```env
 GEMINI_API_KEY="your-gemini-api-key"
+# Or:
+GROQ_API_KEY="your-groq-api-key"
 PORT=3000
 ```
 
@@ -156,9 +160,12 @@ npm start
 
 | Variable | Description | Default | Required? |
 | :--- | :--- | :--- | :--- |
-| `GEMINI_API_KEY` | Google Gemini API key | None | Yes (falls back to offline parser without key) |
-| `GEMINI_MODEL` | Gemini model identifier | `gemini-2.5-flash` | No |
-| `GEMINI_TIMEOUT_MS` | Gemini request timeout in milliseconds | `25000` (25s) | No |
+| `GEMINI_API_KEY` | Optional Google Gemini API key; tried first when both are configured | None | No |
+| `GEMINI_MODEL` | Comma-separated Gemini model order | `gemini-2.5-flash,gemini-2.0-flash-lite` | No |
+| `GROQ_API_KEY` | Optional Groq API key; used directly or as Gemini fallback | None | No |
+| `GROQ_MODEL` | Groq model identifier | `openai/gpt-oss-120b` | No |
+| `GEMINI_TIMEOUT_MS` | Overall Gemini/model fallback budget in milliseconds | `40000` (40s) | No |
+| `UTSAV_AI_OFFLINE` | Skip model calls and use the deterministic starter planner | `0` | No |
 | `PORT` | HTTP server port | `3000` | No |
 | `NODE_ENV` | Runtime environment (`development`, `production`, `test`) | `development` | No |
 
@@ -181,7 +188,7 @@ npm start
 
 ## Testing
 
-Utsav includes 62 comprehensive tests across unit logic, server endpoints, component interactions, sharing/privacy behavior, and automated accessibility verification:
+Utsav includes 76 comprehensive tests across schema validation, unit logic, server endpoints, component interactions, sharing/privacy behavior, Co-planner proposals, provider integration, and automated accessibility verification:
 
 ```bash
 # Run all tests
@@ -194,6 +201,7 @@ npm test
 3. **Fallback & Brief Parsing (`server/fallback.test.ts`, `src/utils/briefParser.test.ts`)**: Regex parsing of complex Indian currency formats (`₹6L`, `1.5 Lakh`, `50k`, `2 Cr`), guest counts, cities, and safe regex replanning.
 4. **Pure Logic & Budget Normalization (`src/utils/planLogic.test.ts`)**: Lock retention, proportional redistribution, exact 100% sum guarantees, and diff detection.
 5. **Component Interaction (`src/components/BudgetTab.test.tsx`)**: Slider adjustments and lock toggles.
+6. **Schema & Privacy (`src/schemas/plan.test.ts`, `src/utils/sharePlan.test.ts`)**: Zod round trips, draft sanitization, Gemini schema filtering, and guest-free share encoding.
 
 ---
 
@@ -245,7 +253,7 @@ curl http://localhost:3000/api/health
 ## Known Limitations
 
 - **Speech Recognition Support**: Voice input uses the Web Speech API (`webkitSpeechRecognition`), supported primarily in Chromium-based browsers (Chrome, Edge) and Safari. Fallback to standard text input is always available.
-- **Offline / Fallback Accuracy**: When operating without a `GEMINI_API_KEY` or during network timeouts, Utsav falls back to deterministic rule-based algorithms. Complex, highly nuanced multi-field replan queries are best served with an active Gemini connection.
+- **Provider fallback**: Utsav always tries Gemini first, retries with Groq when Google fails or returns unusable output, and uses the deterministic rule-based planner when neither provider is configured or both fail. Complex, highly nuanced requests are best served with an active provider connection.
 - **Currency Default**: Default calculations and parsing are optimized for Indian Rupees (INR, Lakhs, Crores).
 
 ---

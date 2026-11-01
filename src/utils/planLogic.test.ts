@@ -18,8 +18,11 @@ import {
   removeBudgetCategory,
   applyPatch,
   computeDiffsFromPatch,
+  filterTasksByDay,
+  calculateDayWiseBudget,
+  calculateQuoteStats,
 } from './planLogic.ts';
-import type { BudgetItem, EventPlan, PlanPatch } from '../types/plan.ts';
+import type { BudgetItem, EventPlan, PlanPatch, EventDay, VendorQuote, VendorRequirement, TimelineTask } from '../types/plan.ts';
 
 const TEST_RISKS = [
   { id: 'rain', title: 'Rain', category: 'weather' as const, likelihood: 'medium' as const, impact: 'high' as const, mitigation: 'Use a canopy', backup_plan: 'Move indoors' },
@@ -400,5 +403,122 @@ describe('planLogic', () => {
 
     const remVendor = diffs.find((d) => d.badge === '-Clown');
     expect(remVendor).toBeDefined();
+  });
+
+  describe('Multi-day and Vendor Quote Logic', () => {
+    const tasks: TimelineTask[] = [
+      { id: 't1', t_minus_days: 30, title: 'Hire DJ', owner: 'Family', done: false }, // no day_number (pre-event)
+      { id: 't2', t_minus_days: 1, title: 'Haldi Setup', owner: 'Decor Team', done: false, day_number: 1, time_slot: 'Morning' },
+      { id: 't3', t_minus_days: 0, title: 'Sangeet Sound Check', owner: 'DJ', done: true, day_number: 2, time_slot: 'Evening' },
+      { id: 't4', t_minus_days: -1, title: 'Baraat Arrival', owner: 'Family', done: false, day_number: 3, time_slot: 'Morning' },
+    ];
+
+    it('filterTasksByDay filters tasks correctly by day', () => {
+      // 'all' returns everything
+      expect(filterTasksByDay(tasks, 'all')).toHaveLength(4);
+
+      // 'pre' returns tasks with no day_number
+      const preTasks = filterTasksByDay(tasks, 'pre');
+      expect(preTasks).toHaveLength(1);
+      expect(preTasks[0].id).toBe('t1');
+
+      // specific day numbers
+      const day1Tasks = filterTasksByDay(tasks, 1);
+      expect(day1Tasks).toHaveLength(1);
+      expect(day1Tasks[0].id).toBe('t2');
+
+      const day2Tasks = filterTasksByDay(tasks, 2);
+      expect(day2Tasks).toHaveLength(1);
+      expect(day2Tasks[0].id).toBe('t3');
+
+      // non-existent day
+      expect(filterTasksByDay(tasks, 99)).toHaveLength(0);
+    });
+
+    it('calculateDayWiseBudget correctly computes day-by-day allocation and general pool', () => {
+      const days: EventDay[] = [
+        { id: 'd1', day_number: 1, title: 'Haldi Ceremony', date: '2026-12-12', time_slot: 'Morning', budget_allocated: 100000 },
+        { id: 'd2', day_number: 2, title: 'Sangeet Night', date: '2026-12-13', time_slot: 'Evening', budget_allocated: 250000 },
+      ];
+
+      const budgetItems: BudgetItem[] = [
+        { category: 'Haldi Yellow Decor', pct: 15, amount: 90000, locked: false, day_number: 1 },
+        { category: 'Sangeet DJ & Lights', pct: 35, amount: 210000, locked: false, day_number: 2 },
+        { category: 'General Photography', pct: 50, amount: 300000, locked: false }, // unassigned
+      ];
+
+      const plan: EventPlan = {
+        title: 'Wedding Extravaganza',
+        event_type: 'wedding',
+        event_date: '2026-12-14',
+        guests: 200,
+        total_budget: 600000,
+        city: 'Jaipur',
+        theme: 'Royal Rajputana',
+        budget: budgetItems,
+        event_days: days,
+        timeline: [],
+        vendors: [],
+        ideas: [],
+        risks: TEST_RISKS,
+      };
+
+      const breakdown = calculateDayWiseBudget(plan);
+      expect(breakdown).toHaveLength(2);
+
+      const day1 = breakdown.find((b) => b.day_number === 1);
+      expect(day1?.allocated).toBe(100000);
+      expect(day1?.items).toHaveLength(1);
+      expect(day1?.pctOfTotal).toBe(17);
+
+      const day2 = breakdown.find((b) => b.day_number === 2);
+      expect(day2?.allocated).toBe(250000);
+      expect(day2?.items).toHaveLength(1);
+      expect(day2?.pctOfTotal).toBe(42);
+    });
+
+    it('calculateQuoteStats computes min, max, average, and identifies selected quote', () => {
+      const quotes: VendorQuote[] = [
+        { id: 'q1', vendor_name: 'DJ Beats', quote_amount: 50000, inclusions: ['4 hours', 'Subwoofer'], status: 'shortlisted', rating: 4.8 },
+        { id: 'q2', vendor_name: 'Sound Wave', quote_amount: 40000, inclusions: ['Standard audio'], status: 'rejected', rating: 4.2 },
+        { id: 'q3', vendor_name: 'Bass Drop Studio', quote_amount: 60000, inclusions: ['Concert audio', 'Truss'], status: 'selected', rating: 4.9 },
+      ];
+
+      const vendor: VendorRequirement = {
+        type: 'DJ & Sound System',
+        est_low: 45000,
+        est_high: 65000,
+        questions: ['Do you have silent disco gear?'],
+        red_flags: ['No generator backup'],
+        outreach_message: 'Hi, looking for wedding DJ.',
+        quotes,
+      };
+
+      const stats = calculateQuoteStats(vendor);
+      expect(stats.quoteCount).toBe(3);
+      expect(stats.minQuote).toBe(40000);
+      expect(stats.maxQuote).toBe(60000);
+      expect(stats.avgQuote).toBe(50000);
+      expect(stats.selectedQuote?.vendor_name).toBe('Bass Drop Studio');
+      expect(stats.selectedQuote?.status).toBe('selected');
+    });
+
+    it('calculateQuoteStats returns zeros when vendor has no quotes', () => {
+      const vendor: VendorRequirement = {
+        type: 'Catering',
+        est_low: 200000,
+        est_high: 300000,
+        questions: [],
+        red_flags: [],
+        outreach_message: '',
+      };
+
+      const stats = calculateQuoteStats(vendor);
+      expect(stats.quoteCount).toBe(0);
+      expect(stats.minQuote).toBe(0);
+      expect(stats.maxQuote).toBe(0);
+      expect(stats.avgQuote).toBe(0);
+      expect(stats.selectedQuote).toBeUndefined();
+    });
   });
 });

@@ -9,7 +9,6 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import dns from 'dns';
 import express from 'express';
-import { app } from './server/app.ts';
 
 // Prioritize IPv4 to prevent hanging on container environments with unrouted IPv6
 dns.setDefaultResultOrder('ipv4first');
@@ -18,6 +17,7 @@ dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const { app } = await import('./server/app.ts');
 
 const port = parseInt(process.env.PORT || '3000', 10);
 const isProduction =

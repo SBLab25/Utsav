@@ -15,12 +15,12 @@ interface StatusBannerProps {
 export function StatusBanner({ source, onRetry, isRetrying = false }: StatusBannerProps) {
   if (!source) return null;
 
-  const isGemini = source === 'gemini';
+  const isAI = source === 'gemini' || source === 'groq';
   const isFallback = source.startsWith('fallback');
 
-  if (!isGemini && !isFallback) return null;
+  if (!isAI && !isFallback) return null;
 
-  if (isGemini) {
+  if (isAI) {
     return (
       <div
         role="status"
@@ -33,7 +33,9 @@ export function StatusBanner({ source, onRetry, isRetrying = false }: StatusBann
             <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
           </span>
           <Sparkles className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-          <span className="text-xs sm:text-sm font-semibold tracking-wide">Live Gemini plan</span>
+          <span className="text-xs sm:text-sm font-semibold tracking-wide">
+            Live {source === 'groq' ? 'Groq' : 'Gemini'} plan
+          </span>
         </div>
         <span className="text-[11px] font-medium text-emerald-600/80 dark:text-emerald-400/80 hidden sm:inline">
           Connected to AI engine

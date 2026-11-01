@@ -1,0 +1,254 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {userId} (Must match request.auth.uid)
+    // Fields:
+    //   - uid: string (required, equals auth UID, immutable)
+    //   - email: string (required, valid email format, max 120 chars)
+    //   - displayName: string (required, 1..80 chars)
+    //   - photoURL: string (optional, valid URL, max 1000 chars)
+    //   - role: string (required, 'user' | 'admin', regular users can only set 'user')
+    //   - createdAt: timestamp (required, recent on create, immutable)
+    //   - updatedAt: timestamp (required, recent on create/update)
+    //
+    // Collection: plans
+    // Document ID: {planId} (1..64 chars string)
+    // Fields:
+    //   - id: string (required, 1..64 chars, matches document ID, immutable)
+    //   - title: string (required, 1..150 chars)
+    //   - ownerId: string (required, equals creator UID on create, immutable)
+    //   - ownerEmail: string (required, valid email, max 120 chars)
+    //   - ownerName: string (required, 1..80 chars)
+    //   - collaboratorIds: list of strings (required, max 20 UIDs)
+    //   - collaboratorEmails: list of strings (required, max 20 valid emails)
+    //   - collaborators: list of maps (required, max 20 maps: {uid, email, displayName, role, addedAt})
+    //   - plan: map (required, event plan payload containing budget, timeline, etc.)
+    //   - createdAt: timestamp (required, recent on create, immutable)
+    //   - updatedAt: timestamp (required, recent on create/update)
+    //   - lastModifiedBy: string (required, UID or name, 1..128 chars)
+    //   - lastModifiedByName: string (required, 1..80 chars)
+    //
+    // ===============================================================
+
+    // Default Deny: All operations denied unless explicitly allowed below
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() && resource != null && request.auth.uid == resource.data.ownerId;
+    }
+
+    function uidUnchanged() {
+      return !('uid' in request.resource.data) || request.resource.data.uid == request.auth.uid;
+    }
+
+    function uidNotModified() {
+      return !('uid' in request.resource.data) || request.resource.data.uid == resource.data.uid;
+    }
+
+    function hasRequiredFields(data, fields) {
+      return data.keys().hasAll(fields);
+    }
+
+    function hasOnlyAllowedFields(data, fields) {
+      return data.keys().hasOnly(fields);
+    }
+
+    function areImmutableFieldsUnchanged(fields) {
+      return resource == null || !request.resource.data.diff(resource.data).affectedKeys().hasAny(fields);
+    }
+
+    function validStringLength(data, field, minLen, maxLen) {
+      return data[field] is string &&
+             data[field].size() >= minLen &&
+             data[field].size() <= maxLen;
+    }
+
+    function isValidEmail(email) {
+      return email is string &&
+             email.size() <= 120 &&
+             email.matches('^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$');
+    }
+
+    function isValidUrl(url) {
+      return url is string &&
+             url.size() <= 1000 &&
+             (url.matches('^https://.*') || url.matches('^http://.*'));
+    }
+
+    function isRecent(time) {
+      return time is timestamp &&
+             time > request.time - duration.value(5, 'm') &&
+             time <= request.time + duration.value(1, 'm');
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      let requiredFields = ['uid', 'email', 'displayName', 'role', 'createdAt', 'updatedAt'];
+      let allowedFields = ['uid', 'email', 'displayName', 'photoURL', 'role', 'createdAt', 'updatedAt'];
+
+      return hasRequiredFields(data, requiredFields) &&
+             hasOnlyAllowedFields(data, allowedFields) &&
+             data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 &&
+             isValidEmail(data.email) &&
+             validStringLength(data, 'displayName', 1, 80) &&
+             (!('photoURL' in data) || isValidUrl(data.photoURL)) &&
+             data.role in ['user', 'admin'] &&
+             data.createdAt is timestamp &&
+             data.updatedAt is timestamp;
+    }
+
+    function isValidCollaboratorMap(collab) {
+      return collab is map &&
+             collab.keys().hasAll(['uid', 'email', 'role']) &&
+             collab.keys().hasOnly(['uid', 'email', 'displayName', 'role', 'addedAt']) &&
+             collab.uid is string && collab.uid.size() >= 1 && collab.uid.size() <= 128 &&
+             collab.email is string && collab.email.size() <= 120 &&
+             collab.role in ['owner', 'editor', 'viewer'] &&
+             (!('displayName' in collab) || (collab.displayName is string && collab.displayName.size() <= 80)) &&
+             (!('addedAt' in collab) || (collab.addedAt is string && collab.addedAt.size() <= 60));
+    }
+
+    function isValidPlanData(planMap) {
+      return planMap is map &&
+             planMap.keys().hasAll(['title', 'event_type', 'guests', 'total_budget']) &&
+             planMap.title is string && planMap.title.size() >= 1 && planMap.title.size() <= 150 &&
+             planMap.event_type is string && planMap.event_type.size() >= 1 && planMap.event_type.size() <= 80 &&
+             planMap.guests is int && planMap.guests >= 1 && planMap.guests <= 100000 &&
+             planMap.total_budget is number && planMap.total_budget >= 0 && planMap.total_budget <= 1000000000 &&
+             (!('event_date' in planMap) || (planMap.event_date is string && planMap.event_date.size() <= 60)) &&
+             (!('city' in planMap) || (planMap.city is string && planMap.city.size() <= 120)) &&
+             (!('theme' in planMap) || (planMap.theme is string && planMap.theme.size() <= 120)) &&
+             (!('host_names' in planMap) || (planMap.host_names is string && planMap.host_names.size() <= 200)) &&
+             (!('budget' in planMap) || (planMap.budget is list && planMap.budget.size() <= 20)) &&
+             (!('timeline' in planMap) || (planMap.timeline is list && planMap.timeline.size() <= 50)) &&
+             (!('vendors' in planMap) || (planMap.vendors is list && planMap.vendors.size() <= 20)) &&
+             (!('ideas' in planMap) || (planMap.ideas is list && planMap.ideas.size() <= 30)) &&
+             (!('risks' in planMap) || (planMap.risks is list && planMap.risks.size() <= 20)) &&
+             (!('guest_list' in planMap) || (planMap.guest_list is list && planMap.guest_list.size() <= 5000)) &&
+             (!('event_days' in planMap) || (planMap.event_days is list && planMap.event_days.size() <= 10));
+    }
+
+    function isValidPlanDoc(data) {
+      let requiredFields = [
+        'id', 'title', 'ownerId', 'ownerEmail', 'ownerName',
+        'collaboratorIds', 'collaboratorEmails', 'collaborators',
+        'plan', 'createdAt', 'updatedAt', 'lastModifiedBy', 'lastModifiedByName'
+      ];
+      let allowedFields = requiredFields;
+
+      return hasRequiredFields(data, requiredFields) &&
+             hasOnlyAllowedFields(data, allowedFields) &&
+             validStringLength(data, 'id', 1, 64) &&
+             validStringLength(data, 'title', 1, 150) &&
+             validStringLength(data, 'ownerId', 1, 128) &&
+             isValidEmail(data.ownerEmail) &&
+             validStringLength(data, 'ownerName', 1, 80) &&
+             data.collaboratorIds is list && data.collaboratorIds.size() <= 20 &&
+             data.collaboratorEmails is list && data.collaboratorEmails.size() <= 20 &&
+             data.collaborators is list && data.collaborators.size() <= 20 &&
+             isValidPlanData(data.plan) &&
+             data.createdAt is timestamp &&
+             data.updatedAt is timestamp &&
+             validStringLength(data, 'lastModifiedBy', 1, 128) &&
+             validStringLength(data, 'lastModifiedByName', 1, 80);
+    }
+
+    // Check if the requesting user has editor permissions on the existing plan
+    function isCollaboratorEditor() {
+      return isAuthenticated() &&
+             resource != null &&
+             request.auth.uid in resource.data.collaboratorIds;
+    }
+
+    // ===============================================================
+    // Collection Rules
+    // ===============================================================
+
+    // 1. Users Collection (Strict PII isolation: Only owner can read/write their own profile)
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+
+      allow create: if isOwner(userId) &&
+                       isValidUser(request.resource.data) &&
+                       request.resource.data.uid == request.auth.uid &&
+                       request.resource.data.role == 'user' &&
+                       isRecent(request.resource.data.createdAt) &&
+                       isRecent(request.resource.data.updatedAt);
+
+      allow update: if isOwner(userId) &&
+                       isValidUser(request.resource.data) &&
+                       request.resource.data.uid == resource.data.uid &&
+                       areImmutableFieldsUnchanged(['uid', 'createdAt']) &&
+                       request.resource.data.role == resource.data.role &&
+                       isRecent(request.resource.data.updatedAt);
+
+      allow delete: if false; // User profiles cannot be deleted directly via client SDK
+    }
+
+    // 2. Plans Collection (Multi-User Collaborative Planning)
+    match /plans/{planId} {
+      // Readable by Owner, listed Collaborators by UID, or listed Collaborators by Verified Email
+      allow read: if isAuthenticated() && (
+        resource.data.ownerId == request.auth.uid ||
+        request.auth.uid in resource.data.collaboratorIds ||
+        (request.auth.token.email != null &&
+         request.auth.token.email.lower() in resource.data.collaboratorEmails)
+      );
+
+      // Create: Any authenticated user can create a plan where they are the owner
+      allow create: if isAuthenticated() &&
+                       isValidPlanDoc(request.resource.data) &&
+                       request.resource.data.id == planId &&
+                       request.resource.data.ownerId == request.auth.uid &&
+                       isRecent(request.resource.data.createdAt) &&
+                       isRecent(request.resource.data.updatedAt);
+
+      // Update:
+      // (a) Owner can update plan data AND manage collaborators
+      // (b) Collaborator with editor access can update plan data, BUT CANNOT change ownership or collaborator lists
+      allow update: if isAuthenticated() && isValidPlanDoc(request.resource.data) && (
+        // Scenario A: Plan Owner updating
+        (
+          resource.data.ownerId == request.auth.uid &&
+          areImmutableFieldsUnchanged(['id', 'ownerId', 'createdAt']) &&
+          isRecent(request.resource.data.updatedAt)
+        ) ||
+        // Scenario B: Collaborator Editor updating plan data (strictly prevented from privilege escalation)
+        (
+          isCollaboratorEditor() &&
+          areImmutableFieldsUnchanged([
+            'id', 'ownerId', 'ownerEmail', 'ownerName',
+            'collaboratorIds', 'collaboratorEmails', 'collaborators', 'createdAt'
+          ]) &&
+          isRecent(request.resource.data.updatedAt)
+        )
+      );
+
+      // Delete: Only the original plan owner can delete the plan
+      allow delete: if isDocOwner();
+    }
+  }
+}
