@@ -147,9 +147,14 @@ router.post('/translate', rateLimit({
           if (!call || typeof call.name !== 'string') continue;
           const candidate = planChangeSchema.safeParse({ op: call.name, ...(call.args || {}) });
           if (!candidate.success) continue;
-          const proposed = applyChange(plan, candidate.data);
-          if (JSON.stringify(proposed) === JSON.stringify(plan)) continue;
-          proposals.push(candidate.data);
+          try {
+            const proposed = applyChange(plan, candidate.data);
+            if (JSON.stringify(proposed) === JSON.stringify(plan)) continue;
+            proposals.push(candidate.data);
+          } catch {
+            // Model-proposed changes are untrusted; invalid references are dropped.
+            continue;
+          }
         }
 
         const reply = typeof result.text === 'string' && result.text.trim()
@@ -158,7 +163,8 @@ router.post('/translate', rateLimit({
             ? `I found ${proposals.length} suggested change${proposals.length === 1 ? '' : 's'} for your review.`
             : 'I could not find a safe change to propose from that request.';
         return res.json({ reply, proposals });
-      } catch (_error) {
+      } catch (error) {
+        console.error('Co-planner request failed:', error);
         return res.status(502).json({ error: 'Co-planner unavailable' });
       }
     });

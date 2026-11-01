@@ -111,6 +111,53 @@ describe('server/api.test.ts', () => {
     }
   });
 
+  it('uses Groq-compatible lowercase tool schemas for Co-planner calls', async () => {
+    const previousGeminiKey = process.env.GEMINI_API_KEY;
+    const previousGroqKey = process.env.GROQ_API_KEY;
+    process.env.GEMINI_API_KEY = '';
+    process.env.GROQ_API_KEY = 'test-groq-key';
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [{
+          message: {
+            content: '',
+            tool_calls: [{
+              function: {
+                name: 'moveBudget',
+                arguments: JSON.stringify({
+                  op: 'moveBudget',
+                  from: 'Venue & Stage Decor',
+                  to: 'Catering & Hospitality',
+                  amount: 20000,
+                }),
+              },
+            }],
+          },
+        }],
+      }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    try {
+      const res = await request(app)
+        .post('/api/chat')
+        .send({ message: 'Move ₹20,000 from decor to catering', plan: VALID_MOCK_PLAN, history: [] });
+
+      expect(res.status).toBe(200);
+      expect(res.body.proposals).toHaveLength(1);
+      const requestBody = JSON.parse(fetchMock.mock.calls[0][1].body);
+      expect(requestBody.tools[0].function.parameters.type).toBe('object');
+      expect(requestBody.tools[0].function.parameters.properties.amount.type).toBe('integer');
+    } finally {
+      vi.unstubAllGlobals();
+      if (previousGeminiKey === undefined) delete process.env.GEMINI_API_KEY;
+      else process.env.GEMINI_API_KEY = previousGeminiKey;
+      if (previousGroqKey === undefined) delete process.env.GROQ_API_KEY;
+      else process.env.GROQ_API_KEY = previousGroqKey;
+    }
+  });
+
   it('empty brief returns 400', async () => {
     const res = await request(app)
       .post('/api/plan')

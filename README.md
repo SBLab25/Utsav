@@ -164,6 +164,7 @@ npm start
 | `GEMINI_API_KEY` | Optional Google Gemini API key; tried first when both are configured | None | No |
 | `GEMINI_MODEL` | Gemini model identifier | `gemini-2.5-flash` | No |
 | `GROQ_API_KEY` | Optional Groq API key; used directly or as Gemini fallback | None | No |
+| `GROQ_MODEL` | Groq model identifier | `openai/gpt-oss-120b` | No |
 | `AI_PROVIDER` | Provider preference: `auto`, `gemini`, or `groq` | `auto` | No |
 | `GROQ_MODEL` | Groq model identifier | `llama-3.3-70b-versatile` | No |
 | `GEMINI_TIMEOUT_MS` | Gemini request timeout in milliseconds | `25000` (25s) | No |

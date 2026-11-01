@@ -18,7 +18,7 @@ import {
 
 export const GEMINI_TIMEOUT_MS = parseInt(process.env.GEMINI_TIMEOUT_MS || '25000', 10);
 export const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
-export const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
+export const GROQ_MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
 export const AI_PROVIDER = process.env.AI_PROVIDER || 'auto';
 const PROVIDER_TIMEOUT_MS = parseInt(process.env.AI_PROVIDER_TIMEOUT_MS || '8000', 10);
 const GROQ_ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
@@ -64,12 +64,30 @@ function toOpenAITools(tools: unknown): unknown[] | undefined {
     const source = tool as { functionDeclarations?: Array<Record<string, unknown>> };
     return source.functionDeclarations || [];
   });
+  const normalizeSchema = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(normalizeSchema);
+    if (!value || typeof value !== 'object') return value;
+    const source = value as Record<string, unknown>;
+    const normalized = Object.fromEntries(
+      Object.entries(source)
+        .filter(([key]) => !['$schema', '$ref', 'definitions', 'minLength', 'maxLength', 'minimum', 'maximum', 'additionalProperties'].includes(key))
+        .map(([key, item]) => [key, normalizeSchema(item)])
+    ) as Record<string, unknown>;
+    if (typeof normalized.const === 'string') {
+      normalized.enum = [normalized.const];
+      delete normalized.const;
+    }
+    if (typeof normalized.type === 'string') {
+      normalized.type = normalized.type.toLowerCase();
+    }
+    return normalized;
+  };
   return declarations.map((declaration) => ({
     type: 'function',
     function: {
       name: declaration.name,
       description: declaration.description,
-      parameters: declaration.parameters,
+      parameters: normalizeSchema(declaration.parameters),
     },
   }));
 }
@@ -112,7 +130,8 @@ async function callGroq(options: GenerateContentOptions, apiKey: string): Promis
       signal: controller.signal,
     });
     if (!response.ok) {
-      throw new Error(`Groq request failed with status ${response.status}`);
+      const errorBody = await response.text();
+      throw new Error(`Groq request failed with status ${response.status}: ${errorBody.slice(0, 500)}`);
     }
     const payload = await response.json() as {
       choices?: Array<{
