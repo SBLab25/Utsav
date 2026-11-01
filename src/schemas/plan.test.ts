@@ -8,6 +8,11 @@ import {
   eventPlanSchema,
   planRequestSchema,
   replanRequestSchema,
+  EventPlanSchema,
+  BudgetItemSchema,
+  VendorRequirementSchema,
+  sanitizeDraft,
+  toGeminiSchema,
 } from './plan.ts';
 import { sanitizeUserText } from '../utils/security.ts';
 
@@ -55,6 +60,53 @@ describe('planSchema', () => {
   it('eventPlanSchema validates a conforming plan successfully', () => {
     const result = eventPlanSchema.safeParse(SAMPLE_VALID_PLAN);
     expect(result.success).toBe(true);
+  });
+
+  it('schema round trip applies defaults for new budget and vendor fields', () => {
+    const parsed = EventPlanSchema.parse({
+      ...SAMPLE_VALID_PLAN,
+      budget: [{ category: 'Venue', pct: 50, locked: false }, { category: 'Food', pct: 50, locked: false }],
+      vendors: [{
+        type: 'Catering',
+        est_low: 10000,
+        est_high: 20000,
+        questions: [],
+        red_flags: [],
+        outreach_message: 'Hello',
+      }],
+    });
+    expect(parsed.budget[0].spent).toBe(0);
+    expect(parsed.vendors[0].status).toBe('todo');
+    expect(BudgetItemSchema.safeParse(parsed.budget[0]).success).toBe(true);
+    expect(VendorRequirementSchema.safeParse(parsed.vendors[0]).success).toBe(true);
+  });
+
+  it('sanitizeDraft keeps valid items, drops invalid items, and clamps numbers', () => {
+    const sanitized = sanitizeDraft({
+      ...SAMPLE_VALID_PLAN,
+      guests: 999999,
+      budget: [
+        { category: 'Keep me', pct: 150, locked: false },
+        { category: '', pct: 30, locked: false },
+      ],
+      timeline: [
+        { t_minus_days: -10, title: 'Keep task', owner: 'Family' },
+        { t_minus_days: 10, title: '', owner: 'Family' },
+      ],
+    });
+    expect(sanitized.guests).toBe(5000);
+    expect(sanitized.budget.some((item) => item.category === 'Keep me')).toBe(true);
+    expect(sanitized.budget.some((item) => item.category === '')).toBe(false);
+    expect(sanitized.timeline).toHaveLength(1);
+    expect(sanitized.timeline[0].t_minus_days).toBe(0);
+    expect(EventPlanSchema.safeParse(sanitized).success).toBe(true);
+  });
+
+  it('toGeminiSchema removes unsupported JSON Schema keywords recursively', () => {
+    const schema = JSON.stringify(toGeminiSchema(EventPlanSchema));
+    for (const key of ['$schema', 'pattern', 'minItems', 'maxItems', 'additionalProperties', '$ref', 'definitions', '$defs']) {
+      expect(schema).not.toContain(`"${key}"`);
+    }
   });
 
   it('eventPlanSchema enforces guest count bounds (1 to 5000)', () => {

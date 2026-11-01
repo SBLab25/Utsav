@@ -354,9 +354,15 @@ export default function App() {
 
   // Save to localStorage whenever plan changes
   const savePlanWithHistory = (newPlan: EventPlan, label: string, diffs?: PlanDiff[]) => {
+    const validation = eventPlanSchema.safeParse(newPlan);
+    if (!validation.success) {
+      setErrorMessage('The plan change was rejected because it is invalid.');
+      setAnnouncement('Plan change rejected: invalid plan data.');
+      return false;
+    }
     const normalizedPlan = {
-      ...newPlan,
-      budget: normalizeBudgetPercentages(newPlan.budget, newPlan.total_budget),
+      ...validation.data,
+      budget: normalizeBudgetPercentages(validation.data.budget, validation.data.total_budget),
     };
 
     setPlan(normalizedPlan);
@@ -374,6 +380,7 @@ export default function App() {
     setHistory(updatedHistory);
     setHistoryIndex(0);
     localStorage.setItem('utsav_plan_history', JSON.stringify(updatedHistory));
+    return true;
   };
 
   const handleMakeOwnCopy = () => {
@@ -491,10 +498,10 @@ export default function App() {
                     guest_list: accumulatedPlan.guest_list || [],
                   };
 
-                  setPlan((prev) => ({
-                    ...prev,
-                    ...accumulatedPlan,
-                  } as EventPlan));
+                  setPlan((prev) => {
+                    const validation = eventPlanSchema.safeParse({ ...prev, ...accumulatedPlan });
+                    return validation.success ? validation.data : prev;
+                  });
 
                   setLoadedSections((prev) => ({ ...prev, core: true }));
                   setIsLoading(false); // Reveal plan header and budget immediately!
@@ -503,28 +510,40 @@ export default function App() {
                   streamedAnySection = true;
                   const timelineData = message.data || [];
                   accumulatedPlan.timeline = timelineData;
-                  setPlan((prev) => ({ ...prev, timeline: timelineData } as EventPlan));
+                  setPlan((prev) => {
+                    const validation = eventPlanSchema.safeParse({ ...prev, timeline: timelineData });
+                    return validation.success ? validation.data : prev;
+                  });
                   setLoadedSections((prev) => ({ ...prev, timeline: true }));
                   setAnnouncement(`Timeline milestones ready: ${timelineData.length} tasks scheduled.`);
                 } else if (message.section === 'vendors') {
                   streamedAnySection = true;
                   const vendorsData = message.data || [];
                   accumulatedPlan.vendors = vendorsData;
-                  setPlan((prev) => ({ ...prev, vendors: vendorsData } as EventPlan));
+                  setPlan((prev) => {
+                    const validation = eventPlanSchema.safeParse({ ...prev, vendors: vendorsData });
+                    return validation.success ? validation.data : prev;
+                  });
                   setLoadedSections((prev) => ({ ...prev, vendors: true }));
                   setAnnouncement(`Vendor hiring guide ready: ${vendorsData.length} categories.`);
                 } else if (message.section === 'ideas') {
                   streamedAnySection = true;
                   const ideasData = message.data || [];
                   accumulatedPlan.ideas = ideasData;
-                  setPlan((prev) => ({ ...prev, ideas: ideasData } as EventPlan));
+                  setPlan((prev) => {
+                    const validation = eventPlanSchema.safeParse({ ...prev, ideas: ideasData });
+                    return validation.success ? validation.data : prev;
+                  });
                   setLoadedSections((prev) => ({ ...prev, ideas: true }));
                   setAnnouncement(`Celebration inspirations ready: ${ideasData.length} concepts.`);
                 } else if (message.section === 'risks') {
                   streamedAnySection = true;
                   const risksData = message.data || [];
                   accumulatedPlan.risks = risksData;
-                  setPlan((prev) => ({ ...prev, risks: risksData } as EventPlan));
+                  setPlan((prev) => {
+                    const validation = eventPlanSchema.safeParse({ ...prev, risks: risksData });
+                    return validation.success ? validation.data : prev;
+                  });
                   setLoadedSections((prev) => ({ ...prev, risks: true }));
                   setAnnouncement(`Risk assessment ready: ${risksData.length} risks analyzed.`);
                 } else if (message.section === 'done') {
@@ -810,10 +829,13 @@ export default function App() {
   const handleRestoreHistory = (index: number) => {
     const item = history[index];
     if (item) {
-      setPlan(item.plan);
-      setHistoryIndex(index);
-      localStorage.setItem('utsav_current_plan', JSON.stringify(item.plan));
-      setActiveDiffs(item.diffsFromPrevious || []);
+      const validation = eventPlanSchema.safeParse(item.plan);
+      if (validation.success) {
+        setPlan(validation.data);
+        setHistoryIndex(index);
+        localStorage.setItem('utsav_current_plan', JSON.stringify(validation.data));
+        setActiveDiffs(item.diffsFromPrevious || []);
+      }
     }
   };
 

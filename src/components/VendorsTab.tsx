@@ -30,11 +30,11 @@ interface VendorsTabProps {
   language?: 'en' | 'hi' | 'te' | 'bn';
 }
 
-type VendorStatus = 'researching' | 'contacted' | 'shortlisted' | 'booked';
+type VendorStatus = 'todo' | 'contacted' | 'shortlisted' | 'booked';
 
 const STATUS_CONFIG: Record<VendorStatus, { label: string; bg: string; text: string; border: string; icon: React.ReactNode }> = {
-  researching: {
-    label: 'Researching',
+  todo: {
+    label: 'To Do',
     bg: 'bg-stone-100 dark:bg-stone-800',
     text: 'text-stone-700 dark:text-stone-300',
     border: 'border-stone-300 dark:border-stone-700',
@@ -142,7 +142,7 @@ export const VendorsTab: React.FC<VendorsTabProps> = ({ vendors, city, onUpdateV
       questions: questionsList,
       red_flags: redFlagsList,
       outreach_message: outreach,
-      status: 'researching',
+      status: 'todo',
       notes: '',
     };
 
@@ -159,18 +159,18 @@ export const VendorsTab: React.FC<VendorsTabProps> = ({ vendors, city, onUpdateV
   // Status counts
   const statusCounts = vendors.reduce(
     (acc, v) => {
-      const s = (v.status || 'researching') as VendorStatus;
+      const s = (v.status || 'todo') as VendorStatus;
       acc[s] = (acc[s] || 0) + 1;
       return acc;
     },
-    { researching: 0, contacted: 0, shortlisted: 0, booked: 0 } as Record<VendorStatus, number>
+    { todo: 0, contacted: 0, shortlisted: 0, booked: 0 } as Record<VendorStatus, number>
   );
 
   // Filter & Search
   const filteredVendors = vendors
     .map((v, originalIndex) => ({ ...v, originalIndex }))
     .filter((v) => {
-      const currentStatus = v.status || 'researching';
+      const currentStatus = v.status || 'todo';
       if (statusFilter !== 'all' && currentStatus !== statusFilter) return false;
 
       if (!searchQuery.trim()) return true;
@@ -207,7 +207,7 @@ export const VendorsTab: React.FC<VendorsTabProps> = ({ vendors, city, onUpdateV
 
         {/* Quick Pipeline Status Counters */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 border-t border-stone-100 dark:border-stone-800/80">
-          {(['researching', 'contacted', 'shortlisted', 'booked'] as VendorStatus[]).map((statusKey) => {
+          {(['todo', 'contacted', 'shortlisted', 'booked'] as VendorStatus[]).map((statusKey) => {
             const conf = STATUS_CONFIG[statusKey];
             const count = statusCounts[statusKey] || 0;
             const isCurrent = statusFilter === statusKey;
@@ -292,7 +292,7 @@ export const VendorsTab: React.FC<VendorsTabProps> = ({ vendors, city, onUpdateV
           {filteredVendors.map((vendor) => {
             const idx = vendor.originalIndex;
             const isCopied = copiedIdx === idx;
-            const currentStatus = (vendor.status || 'researching') as VendorStatus;
+            const currentStatus = (vendor.status || 'todo') as VendorStatus;
             const statusConfig = STATUS_CONFIG[currentStatus];
             const isEditingNotes = activeNotesIndex === idx;
 
@@ -317,7 +317,7 @@ export const VendorsTab: React.FC<VendorsTabProps> = ({ vendors, city, onUpdateV
                           className={`text-xs font-semibold px-2.5 py-1 rounded-lg border cursor-pointer focus:outline-none transition-colors ${statusConfig.bg} ${statusConfig.text} ${statusConfig.border}`}
                           aria-label={`Change status for ${vendor.type}`}
                         >
-                          <option value="researching">Researching</option>
+                          <option value="todo">To Do</option>
                           <option value="contacted">Contacted</option>
                           <option value="shortlisted">Shortlisted</option>
                           <option value="booked">Booked</option>

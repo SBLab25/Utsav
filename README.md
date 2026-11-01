@@ -181,7 +181,7 @@ npm start
 
 ## Testing
 
-Utsav includes 62 comprehensive tests across unit logic, server endpoints, component interactions, sharing/privacy behavior, and automated accessibility verification:
+Utsav includes 66 comprehensive tests across schema validation, unit logic, server endpoints, component interactions, sharing/privacy behavior, and automated accessibility verification:
 
 ```bash
 # Run all tests
@@ -194,6 +194,7 @@ npm test
 3. **Fallback & Brief Parsing (`server/fallback.test.ts`, `src/utils/briefParser.test.ts`)**: Regex parsing of complex Indian currency formats (`₹6L`, `1.5 Lakh`, `50k`, `2 Cr`), guest counts, cities, and safe regex replanning.
 4. **Pure Logic & Budget Normalization (`src/utils/planLogic.test.ts`)**: Lock retention, proportional redistribution, exact 100% sum guarantees, and diff detection.
 5. **Component Interaction (`src/components/BudgetTab.test.tsx`)**: Slider adjustments and lock toggles.
+6. **Schema & Privacy (`src/schemas/plan.test.ts`, `src/utils/sharePlan.test.ts`)**: Zod round trips, draft sanitization, Gemini schema filtering, and guest-free share encoding.
 
 ---
 

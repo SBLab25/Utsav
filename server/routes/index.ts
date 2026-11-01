@@ -23,6 +23,7 @@ import {
   ideasSectionSchema,
   risksSectionSchema,
   translateRequestSchema,
+  sanitizeDraft,
 } from '../../src/schemas/plan.ts';
 import { sanitizeUserText } from '../../src/utils/security.ts';
 import {
@@ -438,7 +439,7 @@ router.post('/replan', async (req, res) => {
 
     if (patchResult.success) {
       try {
-        const patchedPlan = applyPatch(currentPlan, patchResult.patch);
+        const patchedPlan = sanitizeDraft(applyPatch(currentPlan, patchResult.patch), currentPlan);
         const planCheck = eventPlanSchema.safeParse(patchedPlan);
         if (planCheck.success) {
           return res.json({
@@ -454,7 +455,7 @@ router.post('/replan', async (req, res) => {
     }
 
     if (!patchResult.success && patchResult.reason === 'timeout') {
-      const updatedPlan = applySmartReplan(currentPlan, changeInstruction);
+      const updatedPlan = sanitizeDraft(applySmartReplan(currentPlan, changeInstruction), currentPlan);
       return res.json({ plan: updatedPlan, model: 'smart-replan-instant', source: 'fallback-timeout' });
     }
 
@@ -463,7 +464,7 @@ router.post('/replan', async (req, res) => {
     let fullResult = await callGeminiAndValidate(ai, fullPlanPrompt, timeoutMs, getSystemInstruction(language as ContentLanguage));
 
     if (!fullResult.success && fullResult.reason === 'timeout') {
-      const updatedPlan = applySmartReplan(currentPlan, changeInstruction);
+      const updatedPlan = sanitizeDraft(applySmartReplan(currentPlan, changeInstruction), currentPlan);
       return res.json({ plan: updatedPlan, model: 'smart-replan-instant', source: 'fallback-timeout' });
     }
 

@@ -10,7 +10,7 @@ import {
   SYSTEM_INSTRUCTION,
 } from './prompts.ts';
 import {
-  eventPlanSchema,
+  sanitizeDraft,
   planPatchSchema,
   type EventPlan,
   type PlanPatch,
@@ -91,12 +91,7 @@ export async function callGeminiAndValidate(
       return { success: false, reason: 'validation-failed' };
     }
 
-    const validation = eventPlanSchema.safeParse(parsed);
-    if (validation.success) {
-      return { success: true, plan: validation.data };
-    }
-
-    return { success: false, reason: 'validation-failed' };
+    return { success: true, plan: sanitizeDraft(parsed) };
   } catch (_err) {
     return { success: false, reason: 'error' };
   }
