@@ -23,6 +23,9 @@ import {
   LogOut,
   ChevronDown,
   User,
+  Link,
+  MessageCircle,
+  ExternalLink,
 } from 'lucide-react';
 import { EventPlan } from '../types/plan.ts';
 import type { UserProfile, CloudPlanDoc, CloudSyncStatus } from '../types/auth.ts';
@@ -72,8 +75,10 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const [copiedShare, setCopiedShare] = React.useState(false);
   const [copiedLink, setCopiedLink] = React.useState(false);
+  const [shareMenuOpen, setShareMenuOpen] = React.useState(false);
   const [userMenuOpen, setUserMenuOpen] = React.useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
+  const shareMenuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   React.useEffect(() => {
@@ -81,9 +86,22 @@ export const Header: React.FC<HeaderProps> = ({
       if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) {
         setUserMenuOpen(false);
       }
+      if (shareMenuRef.current && !shareMenuRef.current.contains(e.target as Node)) {
+        setShareMenuOpen(false);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setUserMenuOpen(false);
+        setShareMenuOpen(false);
+      }
     };
     document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
   }, []);
 
   const handleShareWhatsApp = () => {
@@ -216,36 +234,156 @@ export const Header: React.FC<HeaderProps> = ({
           </select>
           {plan && (
             <>
-              {/* WhatsApp Share */}
-              <button
-                onClick={handleShareWhatsApp}
-                className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 transition-colors cursor-pointer"
-                title="Copy ready-to-share WhatsApp event summary"
-                aria-label="Copy WhatsApp event summary"
-              >
-                <Share2 className="w-3.5 h-3.5" />
-                <span>{copiedShare ? 'Copied WhatsApp!' : 'Copy WhatsApp summary'}</span>
-              </button>
-
-              <button
-                onClick={handleCopyShareLink}
-                className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl bg-[#3B1F4A]/10 hover:bg-[#3B1F4A]/20 text-[#3B1F4A] dark:text-[#F5A623] border border-[#3B1F4A]/20 dark:border-[#F5A623]/30 transition-colors cursor-pointer"
-                aria-label="Copy share link for this plan"
-              >
-                <Share2 className="w-3.5 h-3.5" />
-                <span>{copiedLink ? 'Copied link!' : 'Share link'}</span>
-              </button>
-
-              {typeof navigator !== 'undefined' && typeof navigator.share === 'function' && (
+              {/* Single Combined Share Action */}
+              <div className="relative" ref={shareMenuRef}>
                 <button
-                  onClick={handleNativeShare}
-                  className="hidden md:inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-700 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-800 transition-colors cursor-pointer"
-                  aria-label="Share plan using device share sheet"
+                  type="button"
+                  onClick={() => setShareMenuOpen((prev) => !prev)}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl border transition-all cursor-pointer shadow-xs ${
+                    copiedLink || copiedShare
+                      ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800'
+                      : 'bg-[#3B1F4A]/10 hover:bg-[#3B1F4A]/20 text-[#3B1F4A] dark:text-[#F5A623] border-[#3B1F4A]/20 dark:border-[#F5A623]/30'
+                  }`}
+                  aria-expanded={shareMenuOpen}
+                  aria-haspopup="true"
+                  aria-label="Share celebration plan"
+                  title="Share celebration plan link, WhatsApp summary, or native share"
                 >
-                  <Share2 className="w-3.5 h-3.5" />
-                  <span>Share</span>
+                  {copiedLink || copiedShare ? (
+                    <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                  ) : (
+                    <Share2 className="w-3.5 h-3.5" />
+                  )}
+                  <span>
+                    {copiedLink ? 'Link Copied!' : copiedShare ? 'WhatsApp Copied!' : 'Share'}
+                  </span>
+                  <ChevronDown className={`w-3 h-3 text-stone-400 transition-transform ${shareMenuOpen ? 'rotate-180' : ''}`} />
                 </button>
-              )}
+
+                {shareMenuOpen && (
+                  <div
+                    className="absolute right-0 mt-2 w-72 sm:w-80 bg-white dark:bg-[#23152C] rounded-2xl shadow-xl border border-stone-200 dark:border-stone-800 p-2.5 z-50 animate-fade-in space-y-1 text-xs"
+                    role="menu"
+                    aria-label="Share plan options"
+                  >
+                    <div className="px-2.5 py-1.5 border-b border-stone-100 dark:border-stone-800/80 mb-1">
+                      <p className="font-semibold text-stone-900 dark:text-stone-100 truncate">
+                        Share "{plan.title || 'Celebration Plan'}"
+                      </p>
+                      <p className="text-[11px] text-stone-500 dark:text-stone-400">
+                        Share interactive plan link or formatted WhatsApp overview
+                      </p>
+                    </div>
+
+                    {/* Option 1: Copy Shareable Link */}
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await handleCopyShareLink();
+                        setTimeout(() => setShareMenuOpen(false), 900);
+                      }}
+                      className="w-full text-left p-2 rounded-xl hover:bg-stone-50 dark:hover:bg-stone-800/60 transition-colors flex items-start gap-2.5 cursor-pointer group"
+                      role="menuitem"
+                    >
+                      <div className="p-1.5 rounded-lg bg-amber-500/10 text-[#B45309] dark:text-[#F5A623] shrink-0 mt-0.5">
+                        <Link className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between">
+                          <span className="font-semibold text-stone-900 dark:text-stone-100 group-hover:text-[#B45309] dark:group-hover:text-[#F5A623]">
+                            Copy Shareable Link
+                          </span>
+                          {copiedLink && (
+                            <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-0.5">
+                              <Check className="w-3 h-3" /> Copied!
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-stone-500 dark:text-stone-400 line-clamp-1 mt-0.5">
+                          Interactive link with your budget, timeline, and vendors
+                        </p>
+                      </div>
+                    </button>
+
+                    {/* Option 2: Copy WhatsApp Summary */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        handleShareWhatsApp();
+                        setTimeout(() => setShareMenuOpen(false), 900);
+                      }}
+                      className="w-full text-left p-2 rounded-xl hover:bg-stone-50 dark:hover:bg-stone-800/60 transition-colors flex items-start gap-2.5 cursor-pointer group"
+                      role="menuitem"
+                    >
+                      <div className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 shrink-0 mt-0.5">
+                        <MessageCircle className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between">
+                          <span className="font-semibold text-stone-900 dark:text-stone-100 group-hover:text-emerald-700 dark:group-hover:text-emerald-400">
+                            Copy WhatsApp Summary
+                          </span>
+                          {copiedShare && (
+                            <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-0.5">
+                              <Check className="w-3 h-3" /> Copied!
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-stone-500 dark:text-stone-400 line-clamp-1 mt-0.5">
+                          Formatted rundown with emojis, run sheet & milestones
+                        </p>
+                      </div>
+                    </button>
+
+                    {/* Option 3: Direct Open in WhatsApp */}
+                    <a
+                      href={`https://wa.me/?text=${encodeURIComponent(generateWhatsAppSummary(plan))}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={() => setShareMenuOpen(false)}
+                      className="w-full text-left p-2 rounded-xl hover:bg-stone-50 dark:hover:bg-stone-800/60 transition-colors flex items-start gap-2.5 cursor-pointer group"
+                      role="menuitem"
+                    >
+                      <div className="p-1.5 rounded-lg bg-emerald-600/10 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5">
+                        <ExternalLink className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <span className="font-semibold text-stone-900 dark:text-stone-100 group-hover:text-emerald-700 dark:group-hover:text-emerald-400">
+                          Open in WhatsApp
+                        </span>
+                        <p className="text-[11px] text-stone-500 dark:text-stone-400 line-clamp-1 mt-0.5">
+                          Send directly to a family chat or WhatsApp group
+                        </p>
+                      </div>
+                    </a>
+
+                    {/* Option 4: Native Device Share (if supported) */}
+                    {typeof navigator !== 'undefined' && typeof navigator.share === 'function' && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShareMenuOpen(false);
+                          handleNativeShare();
+                        }}
+                        className="w-full text-left p-2 rounded-xl hover:bg-stone-50 dark:hover:bg-stone-800/60 transition-colors flex items-start gap-2.5 cursor-pointer border-t border-stone-100 dark:border-stone-800/80 pt-2 group"
+                        role="menuitem"
+                      >
+                        <div className="p-1.5 rounded-lg bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-300 shrink-0 mt-0.5">
+                          <Share2 className="w-4 h-4" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <span className="font-semibold text-stone-900 dark:text-stone-100">
+                            More Options (System Share)
+                          </span>
+                          <p className="text-[11px] text-stone-500 dark:text-stone-400 line-clamp-1 mt-0.5">
+                            Use AirDrop, Messages, or your device share sheet
+                          </p>
+                        </div>
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
 
               <a
                 href={generateGoogleCalendarUrl(

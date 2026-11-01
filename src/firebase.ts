@@ -17,6 +17,9 @@ const firebaseConfig = {
 };
 
 export function isFirebaseConfigured(): boolean {
+  if (typeof process !== 'undefined' && process.env?.NODE_ENV === 'test') {
+    return false;
+  }
   return Boolean(
     firebaseConfig.apiKey &&
     firebaseConfig.apiKey !== 'your_api_key_here' &&
