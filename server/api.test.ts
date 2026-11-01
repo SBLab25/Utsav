@@ -167,6 +167,44 @@ describe('server/api.test.ts', () => {
     expect(res.body.timestamp).toBeDefined();
   });
 
+  it('POST /api/chat returns only safe, plan-valid tool proposals', async () => {
+    setCustomGenAIClient({
+      models: {
+        generateContent: vi.fn().mockResolvedValue({
+          text: 'I found one safe change.',
+          functionCalls: [
+            { name: 'moveBudget', args: { from: 'Venue & Stage Decor', to: 'Catering & Hospitality', amount: 10000 } },
+            { name: 'unknownOperation', args: {} },
+            { name: 'moveBudget', args: { from: 'Missing', to: 'Catering & Hospitality', amount: 10000 } },
+            { name: 'moveBudget', args: { from: 'Venue & Stage Decor', to: 'Catering & Hospitality', amount: 999999999 } },
+          ],
+        }),
+      },
+    });
+
+    const res = await request(app)
+      .post('/api/chat')
+      .send({
+        message: 'Please adjust the budget',
+        plan: VALID_MOCK_PLAN,
+        history: [],
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.reply).toContain('one safe');
+    expect(res.body.proposals).toEqual([
+      { op: 'moveBudget', from: 'Venue & Stage Decor', to: 'Catering & Hospitality', amount: 10000 },
+    ]);
+  });
+
+  it('POST /api/chat rejects oversized messages and never saves a plan', async () => {
+    const res = await request(app)
+      .post('/api/chat')
+      .send({ message: 'x'.repeat(301), plan: VALID_MOCK_PLAN, history: [] });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Invalid chat request');
+  });
+
   it('POST /api/replan returns 200 with source "gemini" and patch for valid PlanPatch', async () => {
     const mockPatch = {
       reason: 'Added 50 guests and scaled budget by ₹1L',

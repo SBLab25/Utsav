@@ -35,7 +35,8 @@ Whether planning a traditional multi-day Indian wedding with Sangeet and Haldi c
 5. **Living Re-Planning Engine** that recalculates the plan when constraints change ("add 50 guests", "reduce budget by ₹1L", "make it eco-friendly") while highlighting exactly what changed with visual diff chips.
 6. **Risk Radar** with likelihood-impact mapping, mitigations, backup plans, and timeline actions.
 7. **Guest management** with RSVP statuses, dietary summaries, CSV import/export, and headcount-linked re-planning.
-8. **Sharing and integrations** with privacy-safe compressed links, print/PDF output, Google Calendar, Google Maps, WhatsApp, and multilingual generated content.
+8. **Co-planner chat** with Gemini function calling, safe proposal validation, before/after previews, and explicit Apply or Discard approval.
+9. **Sharing and integrations** with privacy-safe compressed links, print/PDF output, Google Calendar, Google Maps, WhatsApp, and multilingual generated content.
 
 ---
 
@@ -59,6 +60,7 @@ Whether planning a traditional multi-day Indian wedding with Sangeet and Haldi c
 - **Vendor Negotiation Kits**: Pricing brackets categorized by tier-1 and tier-2 Indian cities, accompanied by specific vetting questions, vendor red flags, and ready-to-send outreach messages.
 - **Cultural Intelligence**: Distinct modules for multi-day weddings (Haldi, Mehendi, Sangeet choreography), community RWA festivals (permissions, volunteer rosters, sound curfews), and personal milestones.
 - **Signature Living Re-Planner**: Free-text change console computing explicit diffs (+₹12,000, moved to T-45, task added) with animated diff chips.
+- **Co-planner Chat**: Ask Gemini for budget, timeline, vendor, idea, guest, or total-budget changes. Every proposal is validated against the current plan and waits for explicit approval.
 - **Snapshot History**: In-browser version snapshots with instant restore, undo/redo, and JSON export/import.
 - **Theme "Confetti & Ink"**: Warm cream (`#FFF8EE`), royal plum (`#3B1F4A`), and marigold (`#F5A623`) with full dark mode support (`#180D1F`) and celebration confetti bursts.
 
@@ -181,7 +183,7 @@ npm start
 
 ## Testing
 
-Utsav includes 66 comprehensive tests across schema validation, unit logic, server endpoints, component interactions, sharing/privacy behavior, and automated accessibility verification:
+Utsav includes 75 comprehensive tests across schema validation, unit logic, server endpoints, component interactions, sharing/privacy behavior, Co-planner proposals, and automated accessibility verification:
 
 ```bash
 # Run all tests

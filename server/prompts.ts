@@ -13,6 +13,7 @@ import {
   PlanPatchSchema,
   toGeminiSchema,
 } from '../src/schemas/plan.ts';
+import { geminiPlanChangeSchemas } from '../src/schemas/changes.ts';
 
 export const geminiResponseSchema = toGeminiSchema(EventPlanSchema);
 
@@ -22,6 +23,18 @@ export const geminiVendorsResponseSchema = toGeminiSchema(VendorsSectionSchema);
 export const geminiIdeasResponseSchema = toGeminiSchema(IdeasSectionSchema);
 export const geminiRisksResponseSchema = toGeminiSchema(RisksSectionSchema);
 export const geminiPlanPatchResponseSchema = toGeminiSchema(PlanPatchSchema);
+
+export const geminiPlanChangeDeclarations = [
+  { name: 'moveBudget', description: 'Move INR from one unlocked budget category to another.', parameters: geminiPlanChangeSchemas.moveBudget },
+  { name: 'logSpend', description: 'Record spend against an existing budget category.', parameters: geminiPlanChangeSchemas.logSpend },
+  { name: 'addTask', description: 'Add a preparation task to the event timeline.', parameters: geminiPlanChangeSchemas.addTask },
+  { name: 'toggleTask', description: 'Toggle an existing timeline task done or not done.', parameters: geminiPlanChangeSchemas.toggleTask },
+  { name: 'addVendor', description: 'Add a new vendor requirement to the plan.', parameters: geminiPlanChangeSchemas.addVendor },
+  { name: 'setVendorStatus', description: 'Update the status and optional quote of an existing vendor.', parameters: geminiPlanChangeSchemas.setVendorStatus },
+  { name: 'addIdea', description: 'Add a creative idea to the plan.', parameters: geminiPlanChangeSchemas.addIdea },
+  { name: 'setGuests', description: 'Set the planned guest count.', parameters: geminiPlanChangeSchemas.setGuests },
+  { name: 'setBudget', description: 'Set the total event budget and rebalance unlocked categories.', parameters: geminiPlanChangeSchemas.setBudget },
+] as const;
 
 export const SYSTEM_INSTRUCTION = `You are Utsav, an expert Indian celebration and event planner with deep cultural, regional, and logistical expertise.
 Plan only celebrations and events (weddings, sangeets, haldi, mehendi, receptions, birthdays, anniversaries, community/RWA festivals like Diwali/Holi/Pooja, housewarmings, college fests, corporate celebrations). Politely decline other unrelated topics with a polite message.

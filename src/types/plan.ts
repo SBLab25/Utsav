@@ -14,6 +14,8 @@ export type {
   PlanPatch,
 } from '../schemas/plan.ts';
 
+export type { PlanChange } from '../schemas/changes.ts';
+
 export interface PlanDiff {
   type: 'budget' | 'date' | 'guests' | 'city' | 'theme' | 'timeline' | 'vendor' | 'idea' | 'risk';
   summary: string;

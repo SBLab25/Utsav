@@ -4,6 +4,8 @@
  */
 
 import type { BudgetItem, EventPlan, PlanDiff, TimelineTask, PlanPatch } from '../types/plan.ts';
+import { eventPlanSchema } from '../schemas/plan.ts';
+import { planChangeSchema, type PlanChange } from '../schemas/changes.ts';
 
 /**
  * Format Indian Rupee currency with standard Indian numbering system (lakhs & crores)
@@ -203,6 +205,7 @@ export function addBudgetCategory(
   if (!newCategory.trim() || items.some((i) => i.category.toLowerCase() === newCategory.trim().toLowerCase())) {
     return items;
   }
+
   const safePct = Math.max(1, Math.min(30, initialPct || 5));
   const newItem: BudgetItem = {
     category: newCategory.trim(),
@@ -227,6 +230,116 @@ export function addBudgetCategory(
   });
 
   return normalizeBudgetPercentages([...updatedItems, newItem], totalBudget);
+}
+
+function budgetAmount(item: BudgetItem, totalBudget: number): number {
+    return typeof item.amount === 'number'
+      ? item.amount
+      : Math.round((item.pct / 100) * totalBudget);
+}
+
+function sameName(left: string, right: string): boolean {
+    return left.trim().toLowerCase() === right.trim().toLowerCase();
+}
+
+function taskDateIsPast(eventDate: string, tMinusDays: number): boolean {
+  const event = new Date(`${eventDate}T00:00:00`);
+  if (Number.isNaN(event.getTime())) return false;
+  event.setDate(event.getDate() - tMinusDays);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return event.getTime() < today.getTime();
+}
+
+/**
+ * Apply one user-approved Co-planner proposal without mutating the input plan.
+ * Invalid or unsafe changes are rejected by returning the original plan.
+ */
+export function applyChange(plan: EventPlan, rawChange: PlanChange): EventPlan {
+    const parsed = planChangeSchema.safeParse(rawChange);
+    if (!parsed.success) return plan;
+    const change = parsed.data;
+    let next: EventPlan = {
+      ...plan,
+      budget: plan.budget.map((item) => ({ ...item })),
+      timeline: plan.timeline.map((item) => ({ ...item })),
+      vendors: plan.vendors.map((item) => ({ ...item, questions: [...item.questions], red_flags: [...item.red_flags] })),
+      ideas: plan.ideas.map((item) => ({ ...item })),
+      guest_list: plan.guest_list?.map((item) => ({ ...item })),
+    };
+
+    if (change.op === 'moveBudget') {
+      const from = next.budget.find((item) => sameName(item.category, change.from));
+      const to = next.budget.find((item) => sameName(item.category, change.to));
+      if (!from || !to || from === to || from.locked || to.locked) return plan;
+      const fromAmount = budgetAmount(from, next.total_budget);
+      if (change.amount > fromAmount) return plan;
+      const updated = next.budget.map((item) => {
+        const amount = budgetAmount(item, next.total_budget);
+        if (item === from) return { ...item, amount: amount - change.amount, pct: ((amount - change.amount) / next.total_budget) * 100 };
+        if (item === to) return { ...item, amount: amount + change.amount, pct: ((amount + change.amount) / next.total_budget) * 100 };
+        return { ...item, amount, pct: (amount / next.total_budget) * 100 };
+      });
+      next = { ...next, budget: normalizeBudgetPercentages(updated, next.total_budget) };
+    } else if (change.op === 'logSpend') {
+      const item = next.budget.find((entry) => sameName(entry.category, change.category));
+      if (!item) return plan;
+      const allocated = budgetAmount(item, next.total_budget);
+      const spent = item.spent || 0;
+      if (spent + change.amount > allocated) return plan;
+      next.budget = next.budget.map((entry) =>
+        entry === item ? { ...entry, spent: spent + change.amount, amount: allocated } : entry
+      );
+    } else if (change.op === 'addTask') {
+      if (next.timeline.some((task) => sameName(task.title, change.title))) return plan;
+      if (next.timeline.length >= 30) return plan;
+      if (taskDateIsPast(next.event_date, change.t_minus_days)) return plan;
+      next.timeline = [...next.timeline, {
+        title: change.title,
+        owner: change.owner,
+        t_minus_days: change.t_minus_days,
+        done: false,
+      }].sort((a, b) => b.t_minus_days - a.t_minus_days);
+    } else if (change.op === 'toggleTask') {
+      const task = next.timeline.find((entry) => sameName(entry.title, change.title));
+      if (!task) return plan;
+      next.timeline = next.timeline.map((entry) =>
+        entry === task ? { ...entry, done: !entry.done } : entry
+      );
+    } else if (change.op === 'addVendor') {
+      if (change.est_low > change.est_high || next.vendors.length >= 12) return plan;
+      if (next.vendors.some((vendor) => sameName(vendor.type, change.type))) return plan;
+      next.vendors = [...next.vendors, {
+        type: change.type,
+        est_low: change.est_low,
+        est_high: change.est_high,
+        questions: change.questions,
+        red_flags: [],
+        outreach_message: '',
+        status: 'todo',
+      }];
+    } else if (change.op === 'setVendorStatus') {
+      const vendor = next.vendors.find((entry) => sameName(entry.type, change.type));
+      if (!vendor) return plan;
+      next.vendors = next.vendors.map((entry) =>
+        entry === vendor ? { ...entry, status: change.status, ...(change.quote === undefined ? {} : { quote: change.quote }) } : entry
+      );
+    } else if (change.op === 'addIdea') {
+      if (next.ideas.length >= 20) return plan;
+      next.ideas = [...next.ideas, {
+        category: change.category,
+        title: change.title,
+        description: change.description,
+      }];
+    } else if (change.op === 'setGuests') {
+      next.guests = change.guests;
+    } else if (change.op === 'setBudget') {
+      next.total_budget = change.total_budget;
+      next.budget = recalculateBudgetWithLocked(next.budget, change.total_budget);
+  }
+
+    const validation = eventPlanSchema.safeParse(next);
+    return validation.success ? validation.data : plan;
 }
 
 /**
