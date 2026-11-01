@@ -1,0 +1,6 @@
+{
+  "name": "Utsav - AI Celebration & Event Planner",
+  "description": "GenAI-powered celebration and event planner with dynamic budgeting, timelines, vendor guides, cultural themes, and real-time re-planning.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
