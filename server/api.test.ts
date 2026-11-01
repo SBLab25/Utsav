@@ -330,6 +330,7 @@ describe('server/api.test.ts', () => {
     expect(raw).toContain('"section":"ideas"');
     expect(raw).toContain('"section":"risks"');
     expect(raw).toContain('"section":"done"');
+    expect(raw).toContain('"source":"fallback-nokey"');
   });
 
   it('POST /api/plan/stream returns 400 for empty brief', async () => {
@@ -402,6 +403,7 @@ describe('server/api.test.ts', () => {
     expect(res.headers['content-type']).toContain('text/event-stream');
     expect(res.text).toContain('Sister Sangeet Streamed');
     expect(res.text).toContain('Book Venue');
+    expect(res.text).toContain('"source":"gemini"');
     expect(res.text).toContain('"section":"done"');
   });
 });

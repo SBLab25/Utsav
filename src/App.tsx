@@ -477,6 +477,10 @@ export default function App() {
                 const message = JSON.parse(jsonStr);
                 if (message.section === 'core') {
                   streamedAnySection = true;
+                  if (message.source) {
+                    setPlanSource(message.source);
+                    localStorage.setItem('utsav_plan_source', message.source);
+                  }
                   const coreData = message.data;
                   const normalizedBudget = normalizeBudgetPercentages(
                     coreData.budget || [],
@@ -598,6 +602,10 @@ export default function App() {
             throw new Error(errData.error || `Server error ${fallbackResp.status}`);
           }
           const data = await fallbackResp.json();
+          if (data.source) {
+            setPlanSource(data.source);
+            localStorage.setItem('utsav_plan_source', data.source);
+          }
           const validation = eventPlanSchema.safeParse(data.plan);
           if (validation.success) {
             const normalized = {

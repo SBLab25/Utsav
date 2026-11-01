@@ -222,6 +222,7 @@ router.post('/plan/stream', async (req, res) => {
           clarifying_question: defaultPlan.clarifying_question,
         },
         fallback: true,
+        source: 'fallback-nokey',
       });
       sendSSE({ section: 'timeline', data: defaultPlan.timeline, fallback: true });
       sendSSE({ section: 'vendors', data: defaultPlan.vendors, fallback: true });
@@ -269,7 +270,12 @@ router.post('/plan/stream', async (req, res) => {
       };
     }
 
-    sendSSE({ section: 'core', data: coreData, fallback: isCoreFallback });
+    sendSSE({
+      section: 'core',
+      data: coreData,
+      fallback: isCoreFallback,
+      source: isCoreFallback ? 'fallback-error' : (ai.provider || 'gemini'),
+    });
 
     if (aborted) return;
 
