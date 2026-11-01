@@ -912,7 +912,7 @@ export default function App() {
       <>
 
       {/* Main Workspace Body */}
-      <main id="main" tabIndex={-1} className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 sm:py-8 focus:outline-none">
+      <main id="main" tabIndex={-1} className="flex-1 max-w-[1800px] 2xl:max-w-[1920px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 focus:outline-none">
         {/* Status Banner */}
         <StatusBanner
           source={planSource}
@@ -945,9 +945,9 @@ export default function App() {
         )}
 
         {/* 2-Column Responsive Workspace */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 xl:gap-8 items-start">
           {/* Left Column: Intake Brief & Re-plan Console */}
-          <div className="lg:col-span-3 space-y-6 no-print">
+          <div className="lg:col-span-3 min-w-0 space-y-6 no-print">
             <BriefInput
               initialBrief={DEFAULT_BRIEF}
               onGeneratePlan={handleGeneratePlan}
@@ -977,7 +977,7 @@ export default function App() {
           </div>
 
           {/* Right Column: Plan Board */}
-          <div className="lg:col-span-6 space-y-6">
+          <div className="lg:col-span-6 min-w-0 space-y-6">
             {isLoading ? (
               <SkeletonLoader />
             ) : !plan ? (
@@ -1332,7 +1332,7 @@ export default function App() {
           </div>
 
           {plan && (
-            <aside className="lg:col-span-3 no-print lg:sticky lg:top-6" aria-label="Co-planner sidebar">
+            <aside className="lg:col-span-3 min-w-0 no-print lg:sticky lg:top-6" aria-label="Co-planner sidebar">
               <CoPlannerPanel plan={plan} onApply={handleApplyCoPlannerChange} />
             </aside>
           )}
