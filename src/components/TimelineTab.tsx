@@ -15,9 +15,10 @@ import {
   Search,
   CheckCheck,
   RotateCcw,
+  ExternalLink,
 } from 'lucide-react';
 import { TimelineTask, EventPlan } from '../types/plan.ts';
-import { getTaskTargetDate, generateICS } from '../utils/planLogic.ts';
+import { getTaskTargetDate, getTaskDateOnly, generateGoogleCalendarUrl, generateICS } from '../utils/planLogic.ts';
 
 interface TimelineTabProps {
   timeline: TimelineTask[];
@@ -232,7 +233,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
             return (
               <div
                 key={`${task.title}-${task.t_minus_days}-${originalIndex}`}
-                className={`relative group bg-white dark:bg-[#23152C] p-4 rounded-2xl border transition-all shadow-xs ${
+                className={`relative group bg-white dark:bg-[#23152C] p-4 rounded-2xl border transition-colors shadow-xs ${
                   showOverdueAlert
                     ? 'border-red-300 dark:border-red-900/60 bg-red-500/[0.03]'
                     : task.done
@@ -308,6 +309,21 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
 
                   {/* Owner & Delete */}
                   <div className="shrink-0 flex items-center gap-3">
+                    <a
+                      href={generateGoogleCalendarUrl(
+                        `[T-${task.t_minus_days}] ${task.title}`,
+                        getTaskDateOnly(eventDate, task.t_minus_days),
+                        `Milestone for ${plan.title}. Owner: ${task.owner || 'Lead'}.`,
+                        plan.city
+                      )}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#B45309] hover:underline dark:text-[#F5A623]"
+                      aria-label={`Add timeline task ${task.title} to Google Calendar`}
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">Google Calendar</span>
+                    </a>
                     <div className="text-right">
                       <span className="text-[11px] font-medium text-stone-400 block">
                         Assigned

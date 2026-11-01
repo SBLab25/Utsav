@@ -77,13 +77,13 @@ export const ReplanBox: React.FC<ReplanBoxProps> = ({ onReplan, isLoading }) => 
             maxLength={300}
             disabled={isLoading}
             placeholder="e.g., add 50 guests and adjust catering budget"
-            className="w-full pl-3.5 pr-20 py-2.5 text-xs sm:text-sm rounded-xl border border-stone-200 dark:border-stone-700 bg-stone-50/60 dark:bg-stone-900/60 text-stone-900 dark:text-stone-100 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-[#F5A623] focus:border-transparent transition-all"
+            className="w-full pl-3.5 pr-20 py-2.5 text-xs sm:text-sm rounded-xl border border-stone-200 dark:border-stone-700 bg-stone-50/60 dark:bg-stone-900/60 text-stone-900 dark:text-stone-100 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-[#F5A623] focus:border-transparent transition-colors"
             aria-label="Re-plan instructions"
           />
           <button
             type="submit"
             disabled={isLoading || !instruction.trim()}
-            className="absolute right-1.5 top-1.5 bottom-1.5 px-3 rounded-lg bg-[#3B1F4A] hover:bg-[#2C1638] text-white dark:bg-[#F5A623] dark:hover:bg-[#E59815] dark:text-stone-950 font-semibold text-xs flex items-center gap-1 transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+            className="absolute right-1.5 top-1.5 bottom-1.5 px-3 rounded-lg bg-[#3B1F4A] hover:bg-[#2C1638] text-white dark:bg-[#F5A623] dark:hover:bg-[#E59815] dark:text-stone-950 font-semibold text-xs flex items-center gap-1 transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
           >
             {isLoading ? (
               <RefreshCw className="w-3.5 h-3.5 animate-spin" />

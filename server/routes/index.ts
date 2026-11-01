@@ -4,6 +4,7 @@
  */
 
 import { Router } from 'express';
+import rateLimit from 'express-rate-limit';
 import {
   generateDefaultPlan,
   applySmartReplan,
@@ -21,6 +22,7 @@ import {
   vendorsSectionSchema,
   ideasSectionSchema,
   risksSectionSchema,
+  translateRequestSchema,
 } from '../../src/schemas/plan.ts';
 import { sanitizeUserText } from '../../src/utils/security.ts';
 import {
@@ -45,10 +47,46 @@ import {
   geminiVendorsResponseSchema,
   geminiIdeasResponseSchema,
   geminiRisksResponseSchema,
+  getSystemInstruction,
+  LANGUAGE_NAMES,
+  type ContentLanguage,
 } from '../prompts.ts';
 import { applyPatch } from '../../src/utils/planLogic.ts';
 
 export const router = Router();
+
+router.post('/translate', rateLimit({
+  windowMs: 1000,
+  limit: 1,
+  standardHeaders: false,
+  legacyHeaders: false,
+  skip: () => process.env.NODE_ENV === 'test',
+  message: { error: 'Please wait before translating again' },
+}), async (req, res) => {
+  const parsed = translateRequestSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid translation request' });
+  const { text, language } = parsed.data;
+  if (language === 'en') return res.json({ translation: text });
+  const ai = getGenAIClient();
+  if (!ai) return res.json({ translation: text, fallback: true });
+  try {
+    const result = await ai.models.generateContent({
+      model: GEMINI_MODEL,
+      contents: `Translate this user-facing event message into ${LANGUAGE_NAMES[language]}. Preserve meaning, names, dates, currency, numbers and line breaks. Return only JSON with a translation string.\n\n${sanitizeUserText(text)}`,
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: { type: 'OBJECT', properties: { translation: { type: 'STRING' } }, required: ['translation'] },
+        systemInstruction: getSystemInstruction(language as ContentLanguage),
+      },
+    });
+    const raw = JSON.parse(result.text || '{}');
+    const translation = typeof raw.translation === 'string' ? raw.translation.slice(0, 1000) : '';
+    if (!translation) return res.status(502).json({ error: 'Translation unavailable' });
+    return res.json({ translation });
+  } catch (_error) {
+    return res.status(502).json({ error: 'Translation unavailable' });
+  }
+});
 
 // Health check endpoint
 router.get('/health', (_req, res) => {
@@ -87,7 +125,7 @@ router.post('/plan/stream', async (req, res) => {
     }
   };
 
-  const { brief } = bodyValidation.data;
+  const { brief, language } = bodyValidation.data;
   const timeoutMs = parseInt(process.env.GEMINI_TIMEOUT_MS || '25000', 10);
   const ai = getGenAIClient();
 
@@ -124,13 +162,14 @@ router.post('/plan/stream', async (req, res) => {
     const sanitizedBrief = sanitizeUserText(brief);
 
     // 1. Generate Core (title, type, date, guests, budget, city, theme, budget categories)
-    const corePrompt = getCorePrompt(sanitizedBrief);
+    const corePrompt = `${getCorePrompt(sanitizedBrief)}\nWrite user-facing content in ${LANGUAGE_NAMES[language]}.`;
     const coreResult = await callGeminiSectionAndValidate(
       ai,
       corePrompt,
       geminiCoreResponseSchema,
       corePlanSchema,
-      timeoutMs
+      timeoutMs,
+      getSystemInstruction(language as ContentLanguage)
     );
 
     if (aborted) return;
@@ -166,7 +205,8 @@ router.post('/plan/stream', async (req, res) => {
       timelinePrompt,
       geminiTimelineResponseSchema,
       timelineSectionSchema,
-      timeoutMs
+      timeoutMs,
+      getSystemInstruction(language as ContentLanguage)
     );
 
     if (aborted) return;
@@ -198,7 +238,8 @@ router.post('/plan/stream', async (req, res) => {
           vendorsPrompt,
           geminiVendorsResponseSchema,
           vendorsSectionSchema,
-          timeoutMs
+          timeoutMs,
+          getSystemInstruction(language as ContentLanguage)
         );
         if (aborted) return;
         if (vendorsResult.success) {
@@ -238,7 +279,8 @@ router.post('/plan/stream', async (req, res) => {
           ideasPrompt,
           geminiIdeasResponseSchema,
           ideasSectionSchema,
-          timeoutMs
+          timeoutMs,
+          getSystemInstruction(language as ContentLanguage)
         );
         if (aborted) return;
         if (ideasResult.success) {
@@ -276,7 +318,8 @@ router.post('/plan/stream', async (req, res) => {
           risksPrompt,
           geminiRisksResponseSchema,
           risksSectionSchema,
-          timeoutMs
+          timeoutMs,
+          getSystemInstruction(language as ContentLanguage)
         );
         if (aborted) return;
         if (risksResult.success) {
@@ -326,7 +369,7 @@ router.post('/plan', async (req, res) => {
       return res.status(400).json({ error: 'Invalid request payload' });
     }
 
-    const { brief } = bodyValidation.data;
+    const { brief, language } = bodyValidation.data;
 
     const ai = getGenAIClient();
     if (!ai) {
@@ -335,11 +378,11 @@ router.post('/plan', async (req, res) => {
     }
 
     const sanitizedBrief = sanitizeUserText(brief);
-    const prompt = getIntakePrompt(sanitizedBrief);
+    const prompt = getIntakePrompt(sanitizedBrief, language as ContentLanguage);
 
     const timeoutMs = parseInt(process.env.GEMINI_TIMEOUT_MS || '25000', 10);
     const activeModel = process.env.GEMINI_MODEL || GEMINI_MODEL;
-    let result = await callGeminiAndValidate(ai, prompt, timeoutMs);
+    let result = await callGeminiAndValidate(ai, prompt, timeoutMs, getSystemInstruction(language as ContentLanguage));
 
     if (!result.success && result.reason === 'timeout') {
       const plan = generateDefaultPlan(brief);
@@ -347,7 +390,7 @@ router.post('/plan', async (req, res) => {
     }
 
     if (!result.success) {
-      result = await callGeminiAndValidate(ai, prompt, timeoutMs);
+      result = await callGeminiAndValidate(ai, prompt, timeoutMs, getSystemInstruction(language as ContentLanguage));
     }
 
     if (result.success) {
@@ -373,6 +416,7 @@ router.post('/replan', async (req, res) => {
 
     const currentPlan = (bodyValidation.data.currentPlan || bodyValidation.data.plan)!;
     const changeInstruction = (bodyValidation.data.changeInstruction || bodyValidation.data.instruction)!;
+    const language = bodyValidation.data.language;
 
     const ai = getGenAIClient();
     if (!ai) {
@@ -390,7 +434,7 @@ router.post('/replan', async (req, res) => {
 
     // 1. Primary path: Ask Gemini for ONLY a PlanPatch
     const patchPrompt = getPlanPatchPrompt(concisePlanJson, sanitizedInstruction);
-    const patchResult = await callGeminiPatchAndValidate(ai, patchPrompt, timeoutMs);
+    const patchResult = await callGeminiPatchAndValidate(ai, patchPrompt, timeoutMs, getSystemInstruction(language as ContentLanguage));
 
     if (patchResult.success) {
       try {
@@ -416,7 +460,7 @@ router.post('/replan', async (req, res) => {
 
     // 2. Secondary path: Fallback to full-plan generation if patch was invalid or failed
     const fullPlanPrompt = getReplanPrompt(concisePlanJson, sanitizedInstruction);
-    let fullResult = await callGeminiAndValidate(ai, fullPlanPrompt, timeoutMs);
+    let fullResult = await callGeminiAndValidate(ai, fullPlanPrompt, timeoutMs, getSystemInstruction(language as ContentLanguage));
 
     if (!fullResult.success && fullResult.reason === 'timeout') {
       const updatedPlan = applySmartReplan(currentPlan, changeInstruction);
@@ -424,7 +468,7 @@ router.post('/replan', async (req, res) => {
     }
 
     if (!fullResult.success) {
-      fullResult = await callGeminiAndValidate(ai, fullPlanPrompt, timeoutMs);
+      fullResult = await callGeminiAndValidate(ai, fullPlanPrompt, timeoutMs, getSystemInstruction(language as ContentLanguage));
     }
 
     if (fullResult.success) {

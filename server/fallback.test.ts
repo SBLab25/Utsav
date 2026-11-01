@@ -7,6 +7,12 @@ import { describe, it, expect } from 'vitest';
 import { generateDefaultPlan, applySmartReplan } from './fallback.ts';
 import type { EventPlan } from '../src/types/plan.ts';
 
+const TEST_RISKS = [
+  { id: 'rain', title: 'Rain', category: 'weather' as const, likelihood: 'medium' as const, impact: 'high' as const, mitigation: 'Use a canopy', backup_plan: 'Move indoors' },
+  { id: 'curfew', title: 'Curfew', category: 'legal' as const, likelihood: 'high' as const, impact: 'high' as const, mitigation: 'Get a permit', backup_plan: 'Use acoustic music' },
+  { id: 'overflow', title: 'Overflow', category: 'logistics' as const, likelihood: 'medium' as const, impact: 'medium' as const, mitigation: 'Keep buffer plates', backup_plan: 'Open a second counter' },
+];
+
 describe('server/fallback', () => {
   it('"Sister\'s sangeet, 150 guests, ₹6L, 14 Dec, Vizag" gives guests 150, budget 600000, city Vizag', () => {
     const brief = "Sister's sangeet, 150 guests, ₹6L, 14 Dec, Vizag";
@@ -33,6 +39,7 @@ describe('server/fallback', () => {
       timeline: [],
       vendors: [],
       ideas: [],
+      risks: TEST_RISKS,
       clarifying_question: null,
     };
 
@@ -56,6 +63,7 @@ describe('server/fallback', () => {
       timeline: [],
       vendors: [],
       ideas: [],
+      risks: TEST_RISKS,
       clarifying_question: null,
     };
 
@@ -79,6 +87,7 @@ describe('server/fallback', () => {
       timeline: [],
       vendors: [],
       ideas: [],
+      risks: TEST_RISKS,
       clarifying_question: null,
     };
 
@@ -97,9 +106,8 @@ describe('server/fallback', () => {
     expect(plan.risks!.length).toBeGreaterThanOrEqual(3);
 
     const firstRisk = plan.risks![0];
-    expect(firstRisk.risk).toBeDefined();
+    expect(firstRisk.title).toBeDefined();
     expect(firstRisk.mitigation).toBeDefined();
-    expect(['low', 'medium', 'high']).toContain(firstRisk.severity);
+    expect(['low', 'medium', 'high']).toContain(firstRisk.likelihood);
   });
 });
-

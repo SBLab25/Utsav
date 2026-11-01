@@ -401,6 +401,81 @@ export function computePlanDiff(oldPlan: EventPlan, newPlan: EventPlan): PlanDif
   return diffs;
 }
 
+function parseDateOnly(value: string): { year: number; month: number; day: number } {
+  const [year, month, day] = value.split('-').map(Number);
+  return { year, month, day };
+}
+
+function addDaysToDateOnly(value: string, days: number): string {
+  const { year, month, day } = parseDateOnly(value);
+  const date = new Date(Date.UTC(year, month - 1, day + days));
+  return [
+    date.getUTCFullYear().toString().padStart(4, '0'),
+    (date.getUTCMonth() + 1).toString().padStart(2, '0'),
+    date.getUTCDate().toString().padStart(2, '0'),
+  ].join('-');
+}
+
+export function getTaskDateOnly(eventDate: string, tMinusDays: number): string {
+  return addDaysToDateOnly(eventDate, -tMinusDays);
+}
+
+function formatIcsDate(value: string): string {
+  return value.replace(/-/g, '');
+}
+
+export function escapeIcsText(value: string): string {
+  return value
+    .replace(/\\/g, '\\\\')
+    .replace(/\r\n|\r|\n/g, '\\n')
+    .replace(/;/g, '\\;')
+    .replace(/,/g, '\\,');
+}
+
+export function foldIcsLine(line: string): string {
+  const bytes = new TextEncoder().encode(line);
+  if (bytes.length <= 75) return line;
+
+  const chunks: string[] = [];
+  let current = '';
+  let currentBytes = 0;
+  for (const character of line) {
+    const characterBytes = new TextEncoder().encode(character).length;
+    if (currentBytes + characterBytes > 75) {
+      chunks.push(current);
+      current = ' ' + character;
+      currentBytes = 1 + characterBytes;
+    } else {
+      current += character;
+      currentBytes += characterBytes;
+    }
+  }
+  if (current) chunks.push(current);
+  return chunks.join('\r\n');
+}
+
+function addIcsEvent(lines: string[], eventLines: string[]): void {
+  lines.push(...eventLines.map((line) => foldIcsLine(line)));
+}
+
+export function generateGoogleCalendarUrl(
+  title: string,
+  date: string,
+  details: string,
+  location?: string
+): string {
+  const start = formatIcsDate(date);
+  const end = formatIcsDate(addDaysToDateOnly(date, 1));
+  const params = new URLSearchParams({
+    action: 'TEMPLATE',
+    text: title,
+    dates: `${start}/${end}`,
+    details,
+  });
+  if (location) params.set('location', location);
+  return `https://calendar.google.com/calendar/render?${params.toString()}`;
+}
+
 /**
  * Generate iCalendar .ics format for calendar import
  */
@@ -411,54 +486,62 @@ export function generateICS(plan: EventPlan): string {
     'PRODID:-//Utsav//Celebration Event Planner//EN',
     'CALSCALE:GREGORIAN',
     'METHOD:PUBLISH',
-    `X-WR-CALNAME:Utsav - ${plan.title || 'Event Plan'}`,
+    `X-WR-CALNAME:${escapeIcsText(`Utsav - ${plan.title || 'Event Plan'}`)}`,
   ];
 
-  const now = new Date()
-    .toISOString()
-    .replace(/[-:]/g, '')
-    .split('.')[0] + 'Z';
+  const now = new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+  const stablePlanId = plan.id || `plan-${(plan.title || 'event-plan').toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
 
   // Add event day itself
   if (plan.event_date) {
-    const eventDayClean = plan.event_date.replace(/-/g, '');
-    lines.push(
+    addIcsEvent(lines, [
       'BEGIN:VEVENT',
-      `UID:utsav-main-${Date.now()}@utsav.app`,
+      `UID:utsav-${stablePlanId}-main@utsav.app`,
       `DTSTAMP:${now}`,
-      `DTSTART;VALUE=DATE:${eventDayClean}`,
-      `DTEND;VALUE=DATE:${eventDayClean}`,
-      `SUMMARY:🎉 ${plan.title || 'Celebration Day'}`,
-      `DESCRIPTION:Celebration: ${plan.title}\\nGuests: ${plan.guests}\\nCity: ${plan.city}\\nTheme: ${plan.theme}`,
+      `DTSTART;VALUE=DATE:${formatIcsDate(plan.event_date)}`,
+      `DTEND;VALUE=DATE:${formatIcsDate(addDaysToDateOnly(plan.event_date, 1))}`,
+      `SUMMARY:${escapeIcsText(`🎉 ${plan.title || 'Celebration Day'}`)}`,
+      `DESCRIPTION:${escapeIcsText(`Celebration: ${plan.title}\nGuests: ${plan.guests}\nCity: ${plan.city}\nTheme: ${plan.theme}`)}`,
       'STATUS:CONFIRMED',
       'TRANSP:TRANSPARENT',
-      'END:VEVENT'
-    );
+      'END:VEVENT',
+    ]);
   }
 
   // Add each timeline task with calculated target date
-  const eventBase = new Date(plan.event_date || new Date().toISOString().slice(0, 10));
-
   plan.timeline.forEach((task, index) => {
-    const taskDate = new Date(eventBase);
-    taskDate.setDate(taskDate.getDate() - task.t_minus_days);
-    const dateFormatted = taskDate.toISOString().slice(0, 10).replace(/-/g, '');
+    const taskDate = getTaskDateOnly(plan.event_date, task.t_minus_days);
 
-    lines.push(
+    addIcsEvent(lines, [
       'BEGIN:VEVENT',
-      `UID:utsav-task-${index}-${Date.now()}@utsav.app`,
+      `UID:utsav-${stablePlanId}-task-${index}@utsav.app`,
       `DTSTAMP:${now}`,
-      `DTSTART;VALUE=DATE:${dateFormatted}`,
-      `DTEND;VALUE=DATE:${dateFormatted}`,
-      `SUMMARY:[T-${task.t_minus_days}] ${task.title}`,
-      `DESCRIPTION:Milestone for ${plan.title}\\nOwner: ${task.owner || 'Lead'}\\nTimeline: T-${task.t_minus_days} days before celebration.`,
+      `DTSTART;VALUE=DATE:${formatIcsDate(taskDate)}`,
+      `DTEND;VALUE=DATE:${formatIcsDate(addDaysToDateOnly(taskDate, 1))}`,
+      `SUMMARY:${escapeIcsText(`[T-${task.t_minus_days}] ${task.title}`)}`,
+      `DESCRIPTION:${escapeIcsText(`Milestone for ${plan.title}\nOwner: ${task.owner || 'Lead'}\nTimeline: T-${task.t_minus_days} days before celebration.`)}`,
       task.done ? 'STATUS:COMPLETED' : 'STATUS:CONFIRMED',
-      'END:VEVENT'
-    );
+      'END:VEVENT',
+    ]);
+  });
+
+  (plan.risks || []).forEach((risk, index) => {
+    const riskDate = addDaysToDateOnly(plan.event_date, -(risk.related_task_t_minus_days ?? 7));
+    addIcsEvent(lines, [
+      'BEGIN:VEVENT',
+      `UID:utsav-${stablePlanId}-risk-${index}@utsav.app`,
+      `DTSTAMP:${now}`,
+      `DTSTART;VALUE=DATE:${formatIcsDate(riskDate)}`,
+      `DTEND;VALUE=DATE:${formatIcsDate(addDaysToDateOnly(riskDate, 1))}`,
+      `SUMMARY:${escapeIcsText(`[Risk Radar] ${risk.title}`)}`,
+      `DESCRIPTION:${escapeIcsText(`Category: ${risk.category}\nLikelihood: ${risk.likelihood}\nImpact: ${risk.impact}\nMitigation: ${risk.mitigation}\nBackup plan: ${risk.backup_plan}`)}`,
+      'STATUS:CONFIRMED',
+      'END:VEVENT',
+    ]);
   });
 
   lines.push('END:VCALENDAR');
-  return lines.join('\r\n');
+  return lines.join('\r\n') + '\r\n';
 }
 
 /**
@@ -475,6 +558,11 @@ export function generateWhatsAppSummary(plan: EventPlan): string {
     .map((t) => `• [T-${t.t_minus_days}] ${t.title} (${t.owner}) ${t.done ? '✅' : '⏳'}`)
     .join('\n');
 
+  const risksStr = (plan.risks || [])
+    .slice(0, 6)
+    .map((risk) => `• ${risk.title} — ${risk.likelihood} likelihood / ${risk.impact} impact\n  Mitigation: ${risk.mitigation}\n  Backup: ${risk.backup_plan}`)
+    .join('\n');
+
   return `🎉 *${plan.title.toUpperCase()}*
 📍 City: ${plan.city} | 👥 Guests: ${plan.guests}
 📅 Date: ${plan.event_date} | ✨ Theme: ${plan.theme}
@@ -485,6 +573,9 @@ ${categoriesStr}
 
 ⏳ *Upcoming Milestones:*
 ${milestonesStr}
+
+🛡️ *Risk Radar:*
+${risksStr}
 
 _Generated with Utsav - AI Celebration & Event Planner_`;
 }
@@ -783,4 +874,3 @@ export function computeDiffsFromPatch(oldPlan: EventPlan, patch: PlanPatch): Pla
 
   return diffs;
 }
-

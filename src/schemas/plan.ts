@@ -43,10 +43,23 @@ export const ideaItemSchema = z.object({
 
 export const riskItemSchema = z.object({
   id: z.string().max(120).optional(),
-  category: z.string().max(120).optional(),
-  risk: z.string().min(1).max(300),
+  title: z.string().min(1).max(180),
+  category: z.enum(['weather', 'vendor', 'health', 'legal', 'logistics', 'budget', 'cultural']),
+  likelihood: z.enum(['low', 'medium', 'high']),
+  impact: z.enum(['low', 'medium', 'high']),
   mitigation: z.string().min(1).max(500),
-  severity: z.enum(['low', 'medium', 'high']).default('medium'),
+  backup_plan: z.string().min(1).max(500),
+  related_task_t_minus_days: z.number().int().min(0).optional(),
+});
+
+export const guestSchema = z.object({
+  id: z.string().min(1).max(120),
+  name: z.string().trim().min(1).max(120),
+  group: z.enum(['family', 'friends', 'colleagues', 'other']),
+  status: z.enum(['invited', 'confirmed', 'declined']),
+  diet: z.enum(['veg', 'non-veg', 'jain', 'vegan']),
+  allergy_note: z.string().max(240).optional(),
+  plus_ones: z.number().int().min(0).max(10).default(0),
 });
 
 export const eventPlanSchema = z.object({
@@ -62,7 +75,8 @@ export const eventPlanSchema = z.object({
   timeline: z.array(timelineTaskSchema).max(30),
   vendors: z.array(vendorRequirementSchema).max(12),
   ideas: z.array(ideaItemSchema).max(20),
-  risks: z.array(riskItemSchema).default([]).optional(),
+  risks: z.array(riskItemSchema).min(3).max(6),
+  guest_list: z.array(guestSchema).max(5000).optional(),
   clarifying_question: z.string().max(1000).nullable().optional(),
   timestamp: z.number().optional(),
 });
@@ -92,7 +106,7 @@ export const ideasSectionSchema = z.object({
 });
 
 export const risksSectionSchema = z.object({
-  risks: z.array(riskItemSchema).max(20),
+  risks: z.array(riskItemSchema).min(3).max(6),
 });
 
 export type CorePlan = z.infer<typeof corePlanSchema>;
@@ -103,6 +117,12 @@ export type RisksSection = z.infer<typeof risksSectionSchema>;
 
 export const planRequestSchema = z.object({
   brief: z.string().trim().min(1).max(500),
+  language: z.enum(['en', 'hi', 'te', 'bn']).default('en'),
+});
+
+export const translateRequestSchema = z.object({
+  text: z.string().trim().min(1).max(1000),
+  language: z.enum(['en', 'hi', 'te', 'bn']),
 });
 
 export const replanRequestSchema = z
@@ -111,6 +131,7 @@ export const replanRequestSchema = z
     plan: eventPlanSchema.optional(),
     changeInstruction: z.string().trim().min(1).max(1000).optional(),
     instruction: z.string().trim().min(1).max(1000).optional(),
+    language: z.enum(['en', 'hi', 'te', 'bn']).default('en'),
   })
   .refine(
     (data) => (Boolean(data.currentPlan || data.plan)) && (Boolean(data.changeInstruction || data.instruction)),
@@ -158,6 +179,7 @@ export type TimelineTask = z.infer<typeof timelineTaskSchema>;
 export type VendorRequirement = z.infer<typeof vendorRequirementSchema>;
 export type IdeaItem = z.infer<typeof ideaItemSchema>;
 export type RiskItem = z.infer<typeof riskItemSchema>;
+export type Guest = z.infer<typeof guestSchema>;
 export type EventPlan = z.infer<typeof eventPlanSchema>;
 export type PlanRequest = z.infer<typeof planRequestSchema>;
 export type ReplanRequest = z.infer<typeof replanRequestSchema>;

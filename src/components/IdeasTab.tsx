@@ -25,6 +25,7 @@ interface IdeasTabProps {
   ideas: IdeaItem[];
   eventTitle: string;
   onUpdateIdeas?: (newIdeas: IdeaItem[]) => void;
+  language?: 'en' | 'hi' | 'te' | 'bn';
 }
 
 const CATEGORY_ICONS: Record<string, React.ReactNode> = {
@@ -45,11 +46,21 @@ const CATEGORY_LABELS: Record<string, string> = {
   rsvp: 'WhatsApp RSVP Template',
 };
 
-export const IdeasTab: React.FC<IdeasTabProps> = ({ ideas, eventTitle, onUpdateIdeas }) => {
+export const IdeasTab: React.FC<IdeasTabProps> = ({ ideas, eventTitle, onUpdateIdeas, language = 'en' }) => {
   const [selectedFilter, setSelectedFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [isAddModalOpen, setIsAddModalOpen] = useState<boolean>(false);
+  const [translations, setTranslations] = useState<Record<number, string>>({});
+  const [translating, setTranslating] = useState<number | null>(null);
+  const translate = async (index: number, text: string) => {
+    setTranslating(index);
+    try {
+      const response = await fetch('/api/translate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, language }) });
+      const data = await response.json();
+      if (response.ok && data.translation) setTranslations((prev) => ({ ...prev, [index]: data.translation }));
+    } finally { setTranslating(null); }
+  };
 
   // New Idea Form State
   const [newCategory, setNewCategory] = useState<string>('entertainment');
@@ -254,7 +265,7 @@ export const IdeasTab: React.FC<IdeasTabProps> = ({ ideas, eventTitle, onUpdateI
             return (
               <div
                 key={copyId}
-                className={`bg-white dark:bg-[#23152C] rounded-2xl border p-5 shadow-xs hover:shadow-md transition-all flex flex-col justify-between ${
+                className={`bg-white dark:bg-[#23152C] rounded-2xl border p-5 shadow-xs hover:shadow-md transition-colors flex flex-col justify-between ${
                   isFavorited
                     ? 'border-[#F5A623]/60 bg-amber-500/[0.015] dark:border-[#F5A623]/40'
                     : 'border-stone-200/90 dark:border-stone-800'
@@ -331,8 +342,13 @@ export const IdeasTab: React.FC<IdeasTabProps> = ({ ideas, eventTitle, onUpdateI
                         : ''
                     }`}
                   >
-                    {idea.description}
+                    {translations[index] || idea.description}
                   </p>
+                  {isTextCopyable && language !== 'en' && (
+                    <button onClick={() => translate(index, idea.description)} className="text-xs text-[#1a56db] hover:underline" disabled={translating === index}>
+                      {translating === index ? 'Translating…' : 'Translate this message'}
+                    </button>
+                  )}
                 </div>
 
                 {!isTextCopyable && (

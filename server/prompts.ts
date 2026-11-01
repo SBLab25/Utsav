@@ -84,15 +84,20 @@ export const geminiResponseSchema = {
     },
     risks: {
       type: Type.ARRAY,
-      description: "Logistical, weather, vendor, and guest management risks with practical mitigation strategies",
+      description: "3-6 ranked risks with likelihood, impact, mitigation, backup plan, and optional timeline link",
       items: {
         type: Type.OBJECT,
         properties: {
-          risk: { type: Type.STRING, description: "Description of the potential risk or bottleneck" },
+          id: { type: Type.STRING, description: "Stable short identifier" },
+          title: { type: Type.STRING, description: "Short title for the risk" },
+          category: { type: Type.STRING, description: "One of: weather, vendor, health, legal, logistics, budget, cultural" },
+          likelihood: { type: Type.STRING, description: "low, medium, or high" },
+          impact: { type: Type.STRING, description: "low, medium, or high" },
           mitigation: { type: Type.STRING, description: "Actionable contingency plan or preventive measure" },
-          severity: { type: Type.STRING, description: "One of: low, medium, high" },
+          backup_plan: { type: Type.STRING, description: "What to do if the risk happens" },
+          related_task_t_minus_days: { type: Type.INTEGER, description: "Optional milestone offset for the mitigation task" },
         },
-        required: ["risk", "mitigation", "severity"],
+        required: ["title", "category", "likelihood", "impact", "mitigation", "backup_plan"],
       },
     },
     clarifying_question: {
@@ -100,7 +105,7 @@ export const geminiResponseSchema = {
       description: "If a crucial key field was missing or ambiguous from the brief, ask ONE clarifying question here, otherwise null",
     },
   },
-  required: ["title", "event_type", "event_date", "guests", "total_budget", "city", "theme", "budget", "timeline", "vendors", "ideas"],
+  required: ["title", "event_type", "event_date", "guests", "total_budget", "city", "theme", "budget", "timeline", "vendors", "ideas", "risks"],
 };
 
 export const geminiCoreResponseSchema = {
@@ -214,15 +219,20 @@ export const geminiRisksResponseSchema = {
   properties: {
     risks: {
       type: Type.ARRAY,
-      description: "3-5 event management risks with concrete mitigation strategies",
+      description: "3-6 event management risks with likelihood, impact, mitigation, backup plan, and optional timeline link",
       items: {
         type: Type.OBJECT,
         properties: {
-          risk: { type: Type.STRING, description: "Description of the risk (e.g. weather, vendor delay, noise curfew, parking, food shortfall)" },
+          id: { type: Type.STRING, description: "Stable short identifier" },
+          title: { type: Type.STRING, description: "Short title for the risk" },
+          category: { type: Type.STRING, description: "weather, vendor, health, legal, logistics, budget, or cultural" },
+          likelihood: { type: Type.STRING, description: "low, medium, or high" },
+          impact: { type: Type.STRING, description: "low, medium, or high" },
           mitigation: { type: Type.STRING, description: "Practical step to prevent or manage the risk" },
-          severity: { type: Type.STRING, description: "low, medium, or high" },
+          backup_plan: { type: Type.STRING, description: "Fallback action if the risk occurs" },
+          related_task_t_minus_days: { type: Type.INTEGER, description: "Optional T-minus day for mitigation" },
         },
-        required: ["risk", "mitigation", "severity"],
+        required: ["title", "category", "likelihood", "impact", "mitigation", "backup_plan"],
       },
     },
   },
@@ -347,9 +357,24 @@ Key Guidelines:
 5. Ideas:
    Must provide creative inspirations across 'theme', 'menu', 'decor', 'entertainment', 'invitation' (formal invitation copy), and 'rsvp' (casual WhatsApp RSVP message).`;
 
-export function getIntakePrompt(sanitizedBrief: string): string {
+export type ContentLanguage = 'en' | 'hi' | 'te' | 'bn';
+export const LANGUAGE_NAMES: Record<ContentLanguage, string> = {
+  en: 'English',
+  hi: 'Hindi',
+  te: 'Telugu',
+  bn: 'Bengali',
+};
+
+export function getSystemInstruction(language: ContentLanguage = 'en'): string {
+  return `${SYSTEM_INSTRUCTION}
+
+Write user-facing text in ${LANGUAGE_NAMES[language]}; for Hindi, Telugu and Bengali use native script and a natural, warm tone for family events. Keep JSON keys, category identifiers, enum values, dates, currency values, counts and other numbers in English/Arabic notation.`;
+}
+
+export function getIntakePrompt(sanitizedBrief: string, language: ContentLanguage = 'en'): string {
   return `Please create a comprehensive celebration event plan based on this user brief:
 <<<USER_EVENT_BRIEF>>>
+Language preference: ${LANGUAGE_NAMES[language]}
 ${sanitizedBrief}
 <<<END_USER_EVENT_BRIEF>>>`;
 }
@@ -374,6 +399,15 @@ export function createConcisePlanForReplan(plan: any): object {
       : [],
     ideas: Array.isArray(plan.ideas)
       ? plan.ideas.map((i: any) => ({ category: i.category, title: i.title }))
+      : [],
+    risks: Array.isArray(plan.risks)
+      ? plan.risks.map((r: any) => ({
+          title: r.title,
+          category: r.category,
+          likelihood: r.likelihood,
+          impact: r.impact,
+          related_task_t_minus_days: r.related_task_t_minus_days,
+        }))
       : [],
   };
 }
@@ -443,6 +477,7 @@ export function getRisksPrompt(core: any): string {
   return `Celebration context:
 Event: "${core.title}" (${core.event_type}) on ${core.event_date} in ${core.city} with ${core.guests} guests, budget ${core.total_budget} INR, theme "${core.theme}".
 
-Identify 3-5 potential logistical, weather, vendor, crowd or timeline risks for this event, along with actionable, practical mitigation steps and severity ('low', 'medium', 'high').`;
+Identify 3-6 risks for this event. Consider the city, season and date (monsoon, heat, festival clashes, peak wedding-season vendor shortages, noise and permission limits for community events), guest count, and how much budget buffer remains after the allocation.
+Use only these categories: weather, vendor, health, legal, logistics, budget, cultural.
+For every risk return a concise title, likelihood, impact, a concrete mitigation, a practical backup plan, and related_task_t_minus_days when a preparatory milestone would help.`;
 }
-

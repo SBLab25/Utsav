@@ -39,6 +39,11 @@ const VALID_MOCK_PLAN = {
       description: "Bell-bottoms, glitter saris, retro movie posters.",
     },
   ],
+  risks: [
+    { id: 'rain', title: 'Rain', category: 'weather', likelihood: 'medium', impact: 'high', mitigation: 'Use a canopy', backup_plan: 'Move indoors' },
+    { id: 'curfew', title: 'Curfew', category: 'legal', likelihood: 'high', impact: 'high', mitigation: 'Get a permit', backup_plan: 'Use acoustic music' },
+    { id: 'overflow', title: 'Guest overflow', category: 'logistics', likelihood: 'medium', impact: 'medium', mitigation: 'Keep buffer plates', backup_plan: 'Open a second counter' },
+  ],
   clarifying_question: null,
 };
 
@@ -79,6 +84,19 @@ describe('server/api.test.ts', () => {
 
     expect(res.status).toBe(400);
     expect(res.body.error).toBe('Invalid request payload');
+  });
+
+  it('translation validates input and passes through English safely', async () => {
+    const invalid = await request(app)
+      .post('/api/translate')
+      .send({ text: 'Hello', language: 'fr' });
+    expect(invalid.status).toBe(400);
+
+    const english = await request(app)
+      .post('/api/translate')
+      .send({ text: 'Hello guests', language: 'en' });
+    expect(english.status).toBe(200);
+    expect(english.body.translation).toBe('Hello guests');
   });
 
   it('600-character brief returns 400', async () => {
@@ -285,7 +303,11 @@ describe('server/api.test.ts', () => {
       ideas: [{ category: 'theme', title: 'Retro', description: 'Music vibe' }],
     };
     const mockRisks = {
-      risks: [{ risk: 'Rain', mitigation: 'Waterproof tent', severity: 'medium' }],
+      risks: [
+        { id: 'rain', title: 'Rain', category: 'weather', likelihood: 'medium', impact: 'high', mitigation: 'Waterproof tent', backup_plan: 'Move indoors' },
+        { id: 'curfew', title: 'Curfew', category: 'legal', likelihood: 'high', impact: 'high', mitigation: 'Get a permit', backup_plan: 'Use acoustic music' },
+        { id: 'overflow', title: 'Overflow', category: 'logistics', likelihood: 'medium', impact: 'medium', mitigation: 'Keep buffer plates', backup_plan: 'Open a second counter' },
+      ],
     };
 
     setCustomGenAIClient({
@@ -311,4 +333,3 @@ describe('server/api.test.ts', () => {
     expect(res.text).toContain('"section":"done"');
   });
 });
-

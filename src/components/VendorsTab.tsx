@@ -27,6 +27,7 @@ interface VendorsTabProps {
   vendors: VendorRequirement[];
   city: string;
   onUpdateVendors?: (newVendors: VendorRequirement[]) => void;
+  language?: 'en' | 'hi' | 'te' | 'bn';
 }
 
 type VendorStatus = 'researching' | 'contacted' | 'shortlisted' | 'booked';
@@ -62,12 +63,22 @@ const STATUS_CONFIG: Record<VendorStatus, { label: string; bg: string; text: str
   },
 };
 
-export const VendorsTab: React.FC<VendorsTabProps> = ({ vendors, city, onUpdateVendors }) => {
+export const VendorsTab: React.FC<VendorsTabProps> = ({ vendors, city, onUpdateVendors, language = 'en' }) => {
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [activeNotesIndex, setActiveNotesIndex] = useState<number | null>(null);
+  const [translations, setTranslations] = useState<Record<number, string>>({});
+  const [translating, setTranslating] = useState<number | null>(null);
+  const translate = async (index: number, text: string) => {
+    setTranslating(index);
+    try {
+      const response = await fetch('/api/translate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, language }) });
+      const data = await response.json();
+      if (response.ok && data.translation) setTranslations((prev) => ({ ...prev, [index]: data.translation }));
+    } finally { setTranslating(null); }
+  };
 
   // New Vendor Form State
   const [newType, setNewType] = useState('');
@@ -205,7 +216,7 @@ export const VendorsTab: React.FC<VendorsTabProps> = ({ vendors, city, onUpdateV
               <button
                 key={statusKey}
                 onClick={() => setStatusFilter(isCurrent ? 'all' : statusKey)}
-                className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                className={`p-2.5 rounded-xl border text-left transition-colors cursor-pointer ${
                   isCurrent
                     ? `${conf.bg} ${conf.border} ring-2 ring-[#F5A623]/30`
                     : 'bg-stone-50 dark:bg-stone-900/60 border-stone-200 dark:border-stone-800 hover:border-stone-300'
@@ -317,6 +328,16 @@ export const VendorsTab: React.FC<VendorsTabProps> = ({ vendors, city, onUpdateV
                     <span className="text-xs text-stone-500 dark:text-stone-400 block">
                       Target City: {city || 'City-wide Benchmarks'}
                     </span>
+                    <a
+                      href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${vendor.type} in ${city}`)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-xs font-semibold text-[#1a56db] dark:text-blue-300 hover:underline"
+                      aria-label={`Find nearby ${vendor.type} vendors in ${city}`}
+                    >
+                      <ExternalLink className="w-3 h-3" />
+                      Find nearby
+                    </a>
                   </div>
 
                   <div className="flex items-center justify-between sm:justify-end gap-4">
@@ -403,8 +424,13 @@ export const VendorsTab: React.FC<VendorsTabProps> = ({ vendors, city, onUpdateV
                     </button>
                   </div>
                   <p className="text-xs text-stone-700 dark:text-stone-300 font-mono whitespace-pre-wrap bg-white dark:bg-stone-950 p-2.5 rounded-lg border border-stone-100 dark:border-stone-800">
-                    {vendor.outreach_message}
+                    {translations[idx] || vendor.outreach_message}
                   </p>
+                  {language !== 'en' && (
+                    <button onClick={() => translate(idx, vendor.outreach_message)} className="text-xs text-[#1a56db] hover:underline" disabled={translating === idx}>
+                      {translating === idx ? 'Translating…' : 'Translate this message'}
+                    </button>
+                  )}
                 </div>
 
                 {/* Custom Notes / Shortlisted Vendor Names */}
