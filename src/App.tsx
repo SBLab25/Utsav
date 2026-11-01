@@ -47,7 +47,6 @@ import { RisksTab } from './components/RisksTab.tsx';
 import { GuestsTab } from './components/GuestsTab.tsx';
 import { HistoryDrawer } from './components/HistoryDrawer.tsx';
 import { SkeletonLoader } from './components/SkeletonLoader.tsx';
-import { StatusBanner } from './components/StatusBanner.tsx';
 import { PrintPlanView } from './components/PrintPlanView.tsx';
 import { SharedPlanView } from './components/SharedPlanView.tsx';
 import { decodeSharedPlan } from './utils/sharePlan.ts';
@@ -300,16 +299,9 @@ export default function App() {
     const saved = typeof window !== 'undefined' ? localStorage.getItem('utsav_language') : null;
     return saved === 'hi' || saved === 'te' || saved === 'bn' ? saved : 'en';
   });
-  const [planSource, setPlanSource] = useState<string | null>(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('utsav_plan_source');
-    }
-    return null;
-  });
   const [lastAction, setLastAction] = useState<
     { type: 'plan'; brief: string } | { type: 'replan'; instruction: string } | null
   >(null);
-  const [isRetrying, setIsRetrying] = useState<boolean>(false);
 
   // Track initial load
   const hasTriggeredInitialConfetti = useRef<boolean>(false);
@@ -477,10 +469,6 @@ export default function App() {
                 const message = JSON.parse(jsonStr);
                 if (message.section === 'core') {
                   streamedAnySection = true;
-                  if (message.source) {
-                    setPlanSource(message.source);
-                    localStorage.setItem('utsav_plan_source', message.source);
-                  }
                   const coreData = message.data;
                   const normalizedBudget = normalizeBudgetPercentages(
                     coreData.budget || [],
@@ -602,10 +590,6 @@ export default function App() {
             throw new Error(errData.error || `Server error ${fallbackResp.status}`);
           }
           const data = await fallbackResp.json();
-          if (data.source) {
-            setPlanSource(data.source);
-            localStorage.setItem('utsav_plan_source', data.source);
-          }
           const validation = eventPlanSchema.safeParse(data.plan);
           if (validation.success) {
             const normalized = {
@@ -679,10 +663,6 @@ export default function App() {
       }
 
       const data = await response.json();
-      if (data.source) {
-        setPlanSource(data.source);
-        localStorage.setItem('utsav_plan_source', data.source);
-      }
 
       const planValidation = eventPlanSchema.safeParse(data.plan);
       if (!planValidation.success) {
@@ -715,22 +695,6 @@ export default function App() {
       setAnnouncement(msg);
     } finally {
       setIsReplanning(false);
-    }
-  };
-
-  // Retry action for StatusBanner
-  const handleRetry = async () => {
-    setIsRetrying(true);
-    try {
-      if (lastAction?.type === 'replan') {
-        await handleReplan(lastAction.instruction);
-      } else if (lastAction?.type === 'plan') {
-        await handleGeneratePlan(lastAction.brief);
-      } else {
-        await handleGeneratePlan(DEFAULT_BRIEF);
-      }
-    } finally {
-      setIsRetrying(false);
     }
   };
 
@@ -921,12 +885,6 @@ export default function App() {
 
       {/* Main Workspace Body */}
       <main id="main" tabIndex={-1} className="flex-1 max-w-[1800px] 2xl:max-w-[1920px] w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 focus:outline-none">
-        {/* Status Banner */}
-        <StatusBanner
-          source={planSource}
-          onRetry={handleRetry}
-          isRetrying={isRetrying || isLoading || isReplanning}
-        />
         {hasSharedHash && !sharedPlan && (
           <div className="mb-6 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-700 dark:text-red-300" role="alert">
             This shared plan link is invalid or corrupted. You can continue with your local plan.
