@@ -4,84 +4,94 @@
  */
 
 import React, { useState } from 'react';
-import { ShieldAlert, AlertTriangle, Info, Plus, CheckCircle2, ShieldCheck } from 'lucide-react';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  CloudRain,
+  Gavel,
+  HeartPulse,
+  Info,
+  MapPin,
+  Plus,
+  ShieldAlert,
+  ShieldCheck,
+  Users,
+  WalletCards,
+  Wrench,
+} from 'lucide-react';
 import type { RiskItem } from '../types/plan.ts';
 
 interface RisksTabProps {
   risks: RiskItem[];
   onUpdateRisks?: (newRisks: RiskItem[]) => void;
+  onAddMitigationToTimeline?: (risk: RiskItem) => void;
   isLoading?: boolean;
 }
+
+const LEVELS: RiskItem['likelihood'][] = ['high', 'medium', 'low'];
+const CATEGORY_ICONS: Record<RiskItem['category'], React.ElementType> = {
+  weather: CloudRain,
+  vendor: Wrench,
+  health: HeartPulse,
+  legal: Gavel,
+  logistics: MapPin,
+  budget: WalletCards,
+  cultural: Users,
+};
+
+const levelLabel = (level: RiskItem['likelihood']) => level.charAt(0).toUpperCase() + level.slice(1);
+
+const levelClasses = (level: RiskItem['likelihood']) => ({
+  high: 'bg-red-100 text-red-800 border-red-300 dark:bg-red-950/60 dark:text-red-300 dark:border-red-800',
+  medium: 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800',
+  low: 'bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800',
+}[level]);
+
+const getRiskScore = (risk: RiskItem) => {
+  const score = { low: 1, medium: 2, high: 3 };
+  return score[risk.likelihood] * score[risk.impact];
+};
 
 export const RisksTab: React.FC<RisksTabProps> = ({
   risks = [],
   onUpdateRisks,
+  onAddMitigationToTimeline,
   isLoading = false,
 }) => {
   const [showAddForm, setShowAddForm] = useState(false);
-  const [newRisk, setNewRisk] = useState('');
+  const [newTitle, setNewTitle] = useState('');
+  const [newCategory, setNewCategory] = useState<RiskItem['category']>('logistics');
+  const [newLikelihood, setNewLikelihood] = useState<RiskItem['likelihood']>('medium');
+  const [newImpact, setNewImpact] = useState<RiskItem['impact']>('medium');
   const [newMitigation, setNewMitigation] = useState('');
-  const [newSeverity, setNewSeverity] = useState<'low' | 'medium' | 'high'>('medium');
+  const [newBackup, setNewBackup] = useState('');
 
-  const handleAddRisk = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newRisk.trim() || !newMitigation.trim()) return;
-
+  const handleAddRisk = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!newTitle.trim() || !newMitigation.trim() || !newBackup.trim()) return;
     const item: RiskItem = {
-      risk: newRisk.trim(),
+      id: `custom-${Date.now()}`,
+      title: newTitle.trim(),
+      category: newCategory,
+      likelihood: newLikelihood,
+      impact: newImpact,
       mitigation: newMitigation.trim(),
-      severity: newSeverity,
+      backup_plan: newBackup.trim(),
     };
-
-    onUpdateRisks?.([item, ...risks]);
-    setNewRisk('');
+    onUpdateRisks?.([item, ...risks].slice(0, 6));
+    setNewTitle('');
     setNewMitigation('');
-    setNewSeverity('medium');
+    setNewBackup('');
     setShowAddForm(false);
-  };
-
-  const getSeverityBadge = (severity: 'low' | 'medium' | 'high') => {
-    switch (severity) {
-      case 'high':
-        return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider bg-red-100 text-red-800 dark:bg-red-950/60 dark:text-red-300 border border-red-300 dark:border-red-800">
-            <AlertTriangle className="w-3 h-3 text-red-600 dark:text-red-400" />
-            High Risk
-          </span>
-        );
-      case 'medium':
-        return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-300 dark:border-amber-800">
-            <Info className="w-3 h-3 text-amber-600 dark:text-amber-400" />
-            Medium Risk
-          </span>
-        );
-      case 'low':
-      default:
-        return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
-            <ShieldCheck className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
-            Low Risk
-          </span>
-        );
-    }
   };
 
   if (isLoading) {
     return (
       <div className="space-y-4 animate-pulse">
-        <div className="h-6 w-48 bg-stone-200 dark:bg-stone-800 rounded-lg"></div>
+        <div className="h-6 w-48 bg-stone-200 dark:bg-stone-800 rounded-lg" />
+        <div className="h-72 bg-stone-200 dark:bg-stone-800 rounded-3xl" />
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {[1, 2, 3, 4].map((i) => (
-            <div
-              key={i}
-              className="p-5 rounded-2xl bg-white/60 dark:bg-[#23152C]/60 border border-stone-200 dark:border-stone-800 space-y-3"
-            >
-              <div className="h-4 w-24 bg-stone-200 dark:bg-stone-700 rounded-full"></div>
-              <div className="h-5 w-3/4 bg-stone-200 dark:bg-stone-700 rounded-md"></div>
-              <div className="h-12 w-full bg-stone-100 dark:bg-stone-800/80 rounded-xl"></div>
-            </div>
-          ))}
+          {[1, 2, 3].map((item) => <div key={item} className="h-36 bg-stone-200 dark:bg-stone-800 rounded-3xl" />)}
         </div>
       </div>
     );
@@ -89,146 +99,102 @@ export const RisksTab: React.FC<RisksTabProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Tab Header Banner */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white/80 dark:bg-[#23152C]/80 backdrop-blur-xs p-5 rounded-3xl border border-stone-200 dark:border-stone-800">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white/80 dark:bg-[#23152C]/80 p-5 rounded-3xl border border-stone-200 dark:border-stone-800">
         <div>
           <h2 className="font-serif text-xl font-bold flex items-center gap-2 text-[#3B1F4A] dark:text-[#FFF8EE]">
             <ShieldAlert className="w-5 h-5 text-[#B45309] dark:text-[#F5A623]" />
-            <span>Risk Assessment & Contingency Kit</span>
+            Risk Radar
           </h2>
           <p className="text-xs text-stone-600 dark:text-stone-300 mt-1">
-            Proactive safeguards for weather, sound curfews, power surges, and guest overflow.
+            Likelihood × impact view with a concrete mitigation and backup plan for every risk.
           </p>
         </div>
-
         {onUpdateRisks && (
           <button
             type="button"
-            onClick={() => setShowAddForm(!showAddForm)}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-xl bg-[#3B1F4A] hover:bg-[#2C1638] text-white dark:bg-[#F5A623] dark:hover:bg-[#E59815] dark:text-stone-950 transition-colors shadow-2xs cursor-pointer shrink-0"
+            onClick={() => setShowAddForm((value) => !value)}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-xl bg-[#3B1F4A] text-white dark:bg-[#F5A623] dark:text-stone-950 cursor-pointer"
           >
-            <Plus className="w-4 h-4" />
-            <span>Add Custom Risk</span>
+            <Plus className="w-4 h-4" /> Add Risk
           </button>
         )}
       </div>
 
-      {/* Add Custom Risk Form */}
-      {showAddForm && (
-        <form
-          onSubmit={handleAddRisk}
-          className="p-5 rounded-3xl bg-white dark:bg-[#23152C] border border-[#B45309]/30 dark:border-[#F5A623]/30 shadow-xs space-y-4"
-        >
-          <h3 className="text-sm font-bold text-[#3B1F4A] dark:text-[#FFF8EE]">
-            Record New Risk & Mitigation
-          </h3>
-          <div className="space-y-3">
-            <div>
-              <label htmlFor="risk-description-input" className="block text-xs font-semibold text-stone-700 dark:text-stone-300 mb-1">
-                Potential Risk or Bottleneck
-              </label>
-              <input
-                id="risk-description-input"
-                type="text"
-                value={newRisk}
-                onChange={(e) => setNewRisk(e.target.value)}
-                placeholder="e.g., Heavy monsoon showers delaying outdoor baraat"
-                required
-                className="w-full px-3.5 py-2 text-xs rounded-xl border border-stone-300 dark:border-stone-700 bg-stone-50/60 dark:bg-stone-900/60 text-stone-900 dark:text-stone-100 focus:outline-none focus:ring-2 focus:ring-[#B45309]"
-              />
-            </div>
-
-            <div>
-              <label htmlFor="risk-mitigation-input" className="block text-xs font-semibold text-stone-700 dark:text-stone-300 mb-1">
-                Actionable Contingency / Mitigation Strategy
-              </label>
-              <textarea
-                id="risk-mitigation-input"
-                value={newMitigation}
-                onChange={(e) => setNewMitigation(e.target.value)}
-                rows={2}
-                placeholder="e.g., Secure waterproof hangar from decorator 48h prior, keep banquet hall ready"
-                required
-                className="w-full px-3.5 py-2 text-xs rounded-xl border border-stone-300 dark:border-stone-700 bg-stone-50/60 dark:bg-stone-900/60 text-stone-900 dark:text-stone-100 focus:outline-none focus:ring-2 focus:ring-[#B45309] resize-none"
-              />
-            </div>
-
-            <div>
-              <label htmlFor="risk-severity-select" className="block text-xs font-semibold text-stone-700 dark:text-stone-300 mb-1">
-                Severity Level
-              </label>
-              <select
-                id="risk-severity-select"
-                value={newSeverity}
-                onChange={(e) => setNewSeverity(e.target.value as any)}
-                className="px-3 py-1.5 text-xs rounded-xl border border-stone-300 dark:border-stone-700 bg-stone-50 dark:bg-stone-900 text-stone-900 dark:text-stone-100 focus:outline-none focus:ring-2 focus:ring-[#B45309]"
+      <div className="bg-white dark:bg-[#23152C] rounded-3xl border border-stone-200 dark:border-stone-800 p-4 sm:p-5">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <h3 className="text-sm font-bold">Risk matrix</h3>
+            <p className="text-[11px] text-stone-500 dark:text-stone-400">Higher and further right means more urgent.</p>
+          </div>
+          <div className="text-[11px] font-semibold text-stone-500 dark:text-stone-400">Impact →</div>
+        </div>
+        <div className="grid grid-cols-[auto_repeat(3,minmax(0,1fr))] gap-1.5 sm:gap-2">
+          <div className="row-span-3 flex items-center justify-center [writing-mode:vertical-rl] rotate-180 text-[11px] font-semibold text-stone-500 dark:text-stone-400">Likelihood ↑</div>
+          {LEVELS.flatMap((likelihood) => LEVELS.map((impact) => {
+            const cellRisks = risks.filter((risk) => risk.likelihood === likelihood && risk.impact === impact);
+            return (
+              <div
+                key={`${likelihood}-${impact}`}
+                className={`min-h-24 sm:min-h-28 rounded-xl border p-2 ${getRiskScore({ likelihood, impact } as RiskItem) >= 6 ? 'bg-red-50/80 border-red-200 dark:bg-red-950/20 dark:border-red-900' : getRiskScore({ likelihood, impact } as RiskItem) >= 3 ? 'bg-amber-50/80 border-amber-200 dark:bg-amber-950/20 dark:border-amber-900' : 'bg-emerald-50/80 border-emerald-200 dark:bg-emerald-950/20 dark:border-emerald-900'}`}
               >
-                <option value="low">Low Severity</option>
-                <option value="medium">Medium Severity</option>
-                <option value="high">High Severity</option>
-              </select>
-            </div>
-          </div>
+                <div className="text-[10px] font-bold uppercase tracking-wide text-stone-500 dark:text-stone-400">
+                  {levelLabel(likelihood)} likelihood · {levelLabel(impact)} impact
+                </div>
+                <div className="mt-2 space-y-1">
+                  {cellRisks.length === 0 ? <span className="text-[11px] text-stone-400">Clear</span> : cellRisks.map((risk) => (
+                    <span key={risk.id || risk.title} className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] font-semibold ${levelClasses(likelihood)}`} title={risk.title}>
+                      {risk.title}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            );
+          }))}
+          <div />
+          {LEVELS.map((impact) => <div key={impact} className="text-center text-[10px] font-bold uppercase tracking-wide text-stone-500 dark:text-stone-400">{levelLabel(impact)} impact</div>)}
+        </div>
+      </div>
 
-          <div className="flex justify-end gap-2 pt-2">
-            <button
-              type="button"
-              onClick={() => setShowAddForm(false)}
-              className="px-3.5 py-1.5 text-xs font-medium rounded-xl border border-stone-200 dark:border-stone-700 hover:bg-stone-100 dark:hover:bg-stone-800 text-stone-700 dark:text-stone-300 transition-colors cursor-pointer"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="px-4 py-1.5 text-xs font-bold rounded-xl bg-[#B45309] hover:bg-[#92400E] text-white dark:bg-[#F5A623] dark:hover:bg-[#E59815] dark:text-stone-950 transition-colors shadow-2xs cursor-pointer"
-            >
-              Save Risk
-            </button>
+      {showAddForm && (
+        <form onSubmit={handleAddRisk} className="p-5 rounded-3xl bg-white dark:bg-[#23152C] border border-[#B45309]/30 dark:border-[#F5A623]/30 space-y-4">
+          <h3 className="text-sm font-bold">Add a custom radar item</h3>
+          <input aria-label="Risk title" value={newTitle} onChange={(event) => setNewTitle(event.target.value)} placeholder="Risk title" required className="w-full px-3 py-2 text-xs rounded-xl border border-stone-300 dark:border-stone-700 bg-stone-50 dark:bg-stone-900" />
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <label className="text-xs font-semibold">Category<select value={newCategory} onChange={(event) => setNewCategory(event.target.value as RiskItem['category'])} className="mt-1 w-full px-2 py-2 rounded-xl border bg-stone-50 dark:bg-stone-900"><option value="weather">Weather</option><option value="vendor">Vendor</option><option value="health">Health</option><option value="legal">Legal</option><option value="logistics">Logistics</option><option value="budget">Budget</option><option value="cultural">Cultural</option></select></label>
+            <label className="text-xs font-semibold">Likelihood<select value={newLikelihood} onChange={(event) => setNewLikelihood(event.target.value as RiskItem['likelihood'])} className="mt-1 w-full px-2 py-2 rounded-xl border bg-stone-50 dark:bg-stone-900"><option>high</option><option>medium</option><option>low</option></select></label>
+            <label className="text-xs font-semibold">Impact<select value={newImpact} onChange={(event) => setNewImpact(event.target.value as RiskItem['impact'])} className="mt-1 w-full px-2 py-2 rounded-xl border bg-stone-50 dark:bg-stone-900"><option>high</option><option>medium</option><option>low</option></select></label>
           </div>
+          <textarea aria-label="Risk mitigation" value={newMitigation} onChange={(event) => setNewMitigation(event.target.value)} placeholder="Preventive mitigation" required rows={2} className="w-full px-3 py-2 text-xs rounded-xl border border-stone-300 dark:border-stone-700 bg-stone-50 dark:bg-stone-900 resize-none" />
+          <textarea aria-label="Risk backup plan" value={newBackup} onChange={(event) => setNewBackup(event.target.value)} placeholder="Backup plan if it happens" required rows={2} className="w-full px-3 py-2 text-xs rounded-xl border border-stone-300 dark:border-stone-700 bg-stone-50 dark:bg-stone-900 resize-none" />
+          <div className="flex justify-end gap-2"><button type="button" onClick={() => setShowAddForm(false)} className="px-3 py-1.5 text-xs rounded-xl border cursor-pointer">Cancel</button><button type="submit" className="px-4 py-1.5 text-xs font-bold rounded-xl bg-[#B45309] text-white cursor-pointer">Save Risk</button></div>
         </form>
       )}
 
-      {/* Grid of Risk Cards */}
-      {risks.length === 0 ? (
-        <div className="p-8 text-center bg-white dark:bg-[#23152C] rounded-3xl border border-stone-200 dark:border-stone-800">
-          <ShieldCheck className="w-8 h-8 text-emerald-500 mx-auto mb-2" />
-          <p className="text-sm font-semibold">No critical risks identified</p>
-          <p className="text-xs text-stone-500 dark:text-stone-400 mt-0.5">
-            Your celebration parameters look smooth and well-balanced.
-          </p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {risks.map((item, idx) => (
-            <div
-              key={item.id || `risk-${idx}`}
-              className="p-5 rounded-3xl bg-white dark:bg-[#23152C] border border-stone-200 dark:border-stone-800 shadow-2xs hover:shadow-xs transition-shadow flex flex-col justify-between gap-4"
-            >
-              <div className="space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  {getSeverityBadge(item.severity)}
-                  <span className="text-[11px] font-mono text-stone-400 dark:text-stone-500">
-                    #{(idx + 1).toString().padStart(2, '0')}
-                  </span>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {risks.map((risk) => {
+          const Icon = CATEGORY_ICONS[risk.category];
+          return (
+            <article key={risk.id || risk.title} className="p-5 rounded-3xl bg-white dark:bg-[#23152C] border border-stone-200 dark:border-stone-800 shadow-2xs space-y-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-2.5">
+                  <Icon className="w-5 h-5 mt-0.5 text-[#B45309] dark:text-[#F5A623]" aria-hidden="true" />
+                  <div><h4 className="font-semibold text-sm">{risk.title}</h4><p className="text-[11px] uppercase tracking-wide text-stone-500 mt-1">{risk.category}</p></div>
                 </div>
-                <h4 className="font-semibold text-sm text-[#3B1F4A] dark:text-[#FFF8EE] leading-snug">
-                  {item.risk}
-                </h4>
+                <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full border text-[10px] font-bold uppercase ${levelClasses(risk.impact)}`}><AlertTriangle className="w-3 h-3" /> Impact: {levelLabel(risk.impact)}</span>
               </div>
-
-              <div className="p-3.5 rounded-2xl bg-stone-50 dark:bg-stone-900/70 border border-stone-100 dark:border-stone-800/80 space-y-1">
-                <div className="flex items-center gap-1.5 text-xs font-semibold text-[#B45309] dark:text-[#F5A623]">
-                  <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-                  <span>Actionable Mitigation</span>
-                </div>
-                <p className="text-xs text-stone-600 dark:text-stone-300 leading-relaxed pl-5">
-                  {item.mitigation}
-                </p>
+              <div className="flex flex-wrap gap-2 text-[11px] font-semibold">
+                <span className={`rounded-full border px-2 py-1 ${levelClasses(risk.likelihood)}`}>Likelihood: {levelLabel(risk.likelihood)}</span>
+                {risk.related_task_t_minus_days !== undefined && <span className="rounded-full border border-stone-200 px-2 py-1 text-stone-600 dark:border-stone-700 dark:text-stone-300">Plan by T-{risk.related_task_t_minus_days}</span>}
               </div>
-            </div>
-          ))}
-        </div>
-      )}
+              <div className="grid gap-3 text-xs">
+                <div className="rounded-2xl bg-stone-50 dark:bg-stone-900/70 p-3"><p className="font-bold text-[#B45309] dark:text-[#F5A623] flex items-center gap-1.5"><CheckCircle2 className="w-3.5 h-3.5" /> Mitigation</p><p className="mt-1 text-stone-600 dark:text-stone-300 leading-relaxed">{risk.mitigation}</p></div>
+                <div className="rounded-2xl bg-stone-50 dark:bg-stone-900/70 p-3"><p className="font-bold text-[#3B1F4A] dark:text-[#FFF8EE] flex items-center gap-1.5"><ShieldCheck className="w-3.5 h-3.5" /> Backup plan</p><p className="mt-1 text-stone-600 dark:text-stone-300 leading-relaxed">{risk.backup_plan}</p></div>
+              </div>
+              {onAddMitigationToTimeline && <button type="button" onClick={() => onAddMitigationToTimeline(risk)} className="inline-flex items-center gap-1.5 text-xs font-bold text-[#B45309] dark:text-[#F5A623] hover:underline cursor-pointer"><Info className="w-3.5 h-3.5" /> Add mitigation to timeline</button>}
+            </article>
+          );
+        })}
+      </div>
     </div>
   );
 };

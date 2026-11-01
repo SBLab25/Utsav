@@ -105,7 +105,7 @@ export const DonutChart: React.FC<DonutChartProps> = ({
                   strokeDasharray={slice.strokeDasharray}
                   strokeDashoffset={slice.strokeDashoffset}
                   strokeLinecap="butt"
-                  className="cursor-pointer transition-all duration-200 hover:opacity-95"
+                  className="cursor-pointer transition-colors duration-200 hover:opacity-95"
                   onMouseEnter={() => setHoveredIdx(slice.idx)}
                   onMouseLeave={() => setHoveredIdx(null)}
                   onClick={() => onSliceClick?.(slice.label)}

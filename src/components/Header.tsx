@@ -17,7 +17,8 @@ import {
   Upload
 } from 'lucide-react';
 import { EventPlan } from '../types/plan.ts';
-import { generateWhatsAppSummary } from '../utils/planLogic.ts';
+import { generateGoogleCalendarUrl, generateWhatsAppSummary } from '../utils/planLogic.ts';
+import { createShareUrl } from '../utils/sharePlan.ts';
 
 interface HeaderProps {
   plan: EventPlan | null;
@@ -26,6 +27,9 @@ interface HeaderProps {
   onOpenHistory: () => void;
   historyCount: number;
   onImportPlan?: (importedPlan: EventPlan) => void;
+  readOnly?: boolean;
+  language?: 'en' | 'hi' | 'te' | 'bn';
+  onLanguageChange?: (language: 'en' | 'hi' | 'te' | 'bn') => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -35,8 +39,12 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenHistory,
   historyCount,
   onImportPlan,
+  readOnly = false,
+  language = 'en',
+  onLanguageChange = () => {},
 }) => {
   const [copiedShare, setCopiedShare] = React.useState(false);
+  const [copiedLink, setCopiedLink] = React.useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleShareWhatsApp = () => {
@@ -49,6 +57,22 @@ export const Header: React.FC<HeaderProps> = ({
 
   const handlePrint = () => {
     window.print();
+  };
+
+  const handleCopyShareLink = async () => {
+    if (!plan) return;
+    await navigator.clipboard.writeText(createShareUrl(plan));
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2000);
+  };
+
+  const handleNativeShare = async () => {
+    if (!plan || !navigator.share) return;
+    await navigator.share({
+      title: plan.title,
+      text: `View the shared Utsav plan for ${plan.title}`,
+      url: createShareUrl(plan),
+    });
   };
 
   const handleExportJSON = () => {
@@ -126,6 +150,15 @@ export const Header: React.FC<HeaderProps> = ({
               <MapPin className="w-3.5 h-3.5 text-[#B45309] dark:text-[#F5A623]" />
               <span>{plan.city}</span>
             </span>
+            <a
+              href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${plan.city} venue area`)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[#1a56db] dark:text-blue-300 hover:underline"
+              aria-label={`View venue area on Google Maps for ${plan.city}`}
+            >
+              View venue area on Google Maps
+            </a>
             <span className="text-stone-300 dark:text-stone-700" aria-hidden="true">·</span>
             <span className="truncate max-w-[200px] text-stone-500 dark:text-stone-400 italic">
               "{plan.theme}"
@@ -135,6 +168,13 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Zone 3: Actions */}
         <div className="flex items-center gap-2 shrink-0">
+          <label htmlFor="header-language" className="sr-only">Generated content language</label>
+          <select id="header-language" value={language} onChange={(e) => onLanguageChange(e.target.value as 'en' | 'hi' | 'te' | 'bn')} className="rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs dark:border-stone-700 dark:bg-stone-900">
+            <option value="en">English</option>
+            <option value="hi">Hindi</option>
+            <option value="te">Telugu</option>
+            <option value="bn">Bengali</option>
+          </select>
           {plan && (
             <>
               {/* WhatsApp Share */}
@@ -145,10 +185,48 @@ export const Header: React.FC<HeaderProps> = ({
                 aria-label="Copy WhatsApp event summary"
               >
                 <Share2 className="w-3.5 h-3.5" />
-                <span>{copiedShare ? 'Copied WhatsApp!' : 'Share WhatsApp'}</span>
+                <span>{copiedShare ? 'Copied WhatsApp!' : 'Copy WhatsApp summary'}</span>
               </button>
 
+              <button
+                onClick={handleCopyShareLink}
+                className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl bg-[#3B1F4A]/10 hover:bg-[#3B1F4A]/20 text-[#3B1F4A] dark:text-[#F5A623] border border-[#3B1F4A]/20 dark:border-[#F5A623]/30 transition-colors cursor-pointer"
+                aria-label="Copy share link for this plan"
+              >
+                <Share2 className="w-3.5 h-3.5" />
+                <span>{copiedLink ? 'Copied link!' : 'Share link'}</span>
+              </button>
+
+              {typeof navigator !== 'undefined' && typeof navigator.share === 'function' && (
+                <button
+                  onClick={handleNativeShare}
+                  className="hidden md:inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-700 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-800 transition-colors cursor-pointer"
+                  aria-label="Share plan using device share sheet"
+                >
+                  <Share2 className="w-3.5 h-3.5" />
+                  <span>Share</span>
+                </button>
+              )}
+
+              <a
+                href={generateGoogleCalendarUrl(
+                  plan.title || 'Utsav celebration',
+                  plan.event_date,
+                  `Utsav celebration for ${plan.guests} guests. Theme: ${plan.theme}.`,
+                  plan.city
+                )}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl bg-[#4285F4]/10 hover:bg-[#4285F4]/20 text-[#1a56db] dark:text-blue-300 border border-[#4285F4]/30 transition-colors"
+                aria-label={`Add ${plan.title} to Google Calendar`}
+              >
+                <Calendar className="w-3.5 h-3.5" />
+                <span>Google Calendar</span>
+              </a>
+
               {/* Export JSON */}
+              {!readOnly && (
+              <>
               <button
                 onClick={handleExportJSON}
                 className="hidden md:inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-900 text-stone-700 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-800 transition-colors cursor-pointer"
@@ -167,7 +245,7 @@ export const Header: React.FC<HeaderProps> = ({
                 aria-label="Print celebration plan view"
               >
                 <Printer className="w-3.5 h-3.5" />
-                <span>Print</span>
+                <span>Print or save as PDF</span>
               </button>
 
               {/* History Drawer Toggle */}
@@ -206,6 +284,8 @@ export const Header: React.FC<HeaderProps> = ({
                     <Upload className="w-3.5 h-3.5" />
                   </button>
                 </>
+              )}
+              </>
               )}
             </>
           )}

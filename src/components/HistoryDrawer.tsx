@@ -127,7 +127,7 @@ export const HistoryDrawer: React.FC<HistoryDrawerProps> = ({
               return (
                 <div
                   key={item.id}
-                  className={`p-4 rounded-xl border transition-all ${
+                  className={`p-4 rounded-xl border transition-colors ${
                     isCurrent
                       ? 'border-[#B45309] dark:border-[#F5A623] bg-amber-500/[0.06] dark:bg-amber-500/[0.1] shadow-xs'
                       : 'border-stone-200 dark:border-stone-800 hover:border-stone-300 dark:hover:border-stone-700 bg-stone-50/50 dark:bg-stone-900/40'

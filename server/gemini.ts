@@ -54,7 +54,8 @@ export type GeminiCallResult =
 export async function callGeminiAndValidate(
   ai: any,
   prompt: string,
-  timeoutMs: number = GEMINI_TIMEOUT_MS
+  timeoutMs: number = GEMINI_TIMEOUT_MS,
+  systemInstruction: string = SYSTEM_INSTRUCTION
 ): Promise<GeminiCallResult> {
   try {
     const modelToUse = process.env.GEMINI_MODEL || GEMINI_MODEL;
@@ -63,7 +64,7 @@ export async function callGeminiAndValidate(
       contents: prompt,
       config: {
         thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-        systemInstruction: SYSTEM_INSTRUCTION,
+        systemInstruction,
         responseMimeType: 'application/json',
         responseSchema: geminiResponseSchema,
       },
@@ -108,7 +109,8 @@ export type GeminiPatchResult =
 export async function callGeminiPatchAndValidate(
   ai: any,
   prompt: string,
-  timeoutMs: number = GEMINI_TIMEOUT_MS
+  timeoutMs: number = GEMINI_TIMEOUT_MS,
+  systemInstruction: string = SYSTEM_INSTRUCTION
 ): Promise<GeminiPatchResult> {
   try {
     const modelToUse = process.env.GEMINI_MODEL || GEMINI_MODEL;
@@ -117,7 +119,7 @@ export async function callGeminiPatchAndValidate(
       contents: prompt,
       config: {
         thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-        systemInstruction: SYSTEM_INSTRUCTION,
+        systemInstruction,
         responseMimeType: 'application/json',
         responseSchema: geminiPlanPatchResponseSchema,
       },
@@ -164,7 +166,8 @@ export async function callGeminiSectionAndValidate<T>(
   prompt: string,
   geminiSchema: any,
   zodSchema: { safeParse: (data: any) => { success: true; data: T } | { success: false } },
-  timeoutMs: number = GEMINI_TIMEOUT_MS
+  timeoutMs: number = GEMINI_TIMEOUT_MS,
+  systemInstruction: string = SYSTEM_INSTRUCTION
 ): Promise<GeminiSectionResult<T>> {
   try {
     const modelToUse = process.env.GEMINI_MODEL || GEMINI_MODEL;
@@ -173,7 +176,7 @@ export async function callGeminiSectionAndValidate<T>(
       contents: prompt,
       config: {
         thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-        systemInstruction: SYSTEM_INSTRUCTION,
+        systemInstruction,
         responseMimeType: 'application/json',
         responseSchema: geminiSchema,
       },
@@ -210,4 +213,3 @@ export async function callGeminiSectionAndValidate<T>(
     return { success: false, reason: 'error' };
   }
 }
-

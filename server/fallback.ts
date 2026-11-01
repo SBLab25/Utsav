@@ -365,32 +365,83 @@ export function generateDefaultRisks(
   guests: number
 ): RiskItem[] {
   const isLarge = guests >= 250;
+  const isCommunity = eventType === 'community';
+  const isWedding = eventType === 'wedding' || eventType === 'sangeet';
   return [
     {
-      risk: `Unpredictable weather or seasonal rain impacting outdoor areas in ${city}`,
+      id: 'weather',
+      title: `Weather disruption in ${city}`,
+      category: 'weather',
+      likelihood: 'medium',
+      impact: 'high',
       mitigation: `Secure venue with integrated indoor hall or pre-book waterproof canopy hangars 48 hours prior.`,
-      severity: 'medium',
+      backup_plan: 'Move the ceremony and sound-sensitive activities indoors using the pre-approved floor plan.',
+      related_task_t_minus_days: 7,
     },
     {
-      risk: `Local sound curfew enforcement after 10:00 PM for DJ & high-decibel music in ${city}`,
+      id: 'permissions',
+      title: isCommunity ? 'Permission and sound-curfew constraints' : 'Local sound-curfew enforcement',
+      category: 'legal',
+      likelihood: isCommunity ? 'high' : 'medium',
+      impact: 'high',
       mitigation: `Obtain local police and municipal entertainment permissions in advance, and plan after-party playlist indoors.`,
-      severity: eventType === 'sangeet' || eventType === 'birthday' ? 'high' : 'medium',
+      backup_plan: 'Switch to an acoustic or low-volume program and end amplified sound before the local curfew.',
+      related_task_t_minus_days: 30,
     },
     {
-      risk: `Guest count exceeding estimated ${guests} attendees leading to catering and bar bottlenecks`,
+      id: 'guest-overflow',
+      title: `Guest count exceeds the planned ${guests}`,
+      category: 'logistics',
+      likelihood: isLarge ? 'high' : 'medium',
+      impact: 'medium',
       mitigation: `Contract a 10-15% buffer plate margin with caterer and operate twin live counter stations.`,
-      severity: isLarge ? 'high' : 'medium',
+      backup_plan: 'Release the reserved buffer tables and prioritize quick-serve counters for the first 30 minutes.',
+      related_task_t_minus_days: 15,
     },
     {
-      risk: `High electrical load from stage lighting, air-conditioning, and audio rigs tripping venue breakers`,
+      id: 'power',
+      title: 'Power or production failure',
+      category: 'vendor',
+      likelihood: 'medium',
+      impact: 'high',
       mitigation: `Require venue or production vendor to provide a dedicated 62.5+ kVA silent generator backup with auto-switchover.`,
-      severity: 'medium',
+      backup_plan: 'Run the event on the essential lighting and audio circuit while the production team isolates the failed load.',
+      related_task_t_minus_days: 7,
     },
     {
-      risk: `Traffic congestion and tight parking access for arriving guests in ${city}`,
+      id: 'arrival',
+      title: `Traffic and parking delays in ${city}`,
+      category: 'logistics',
+      likelihood: 'medium',
+      impact: 'medium',
       mitigation: `Contract dedicated valet staff and share GPS parking instructions directly in the digital invite.`,
-      severity: 'low',
+      backup_plan: 'Open a secondary arrival point and assign volunteers to direct guests to overflow parking.',
+      related_task_t_minus_days: 3,
     },
+    ...(isWedding
+      ? [{
+          id: 'vendor-shortage',
+          title: 'Peak-season vendor shortage',
+          category: 'vendor' as const,
+          likelihood: 'medium' as const,
+          impact: 'high' as const,
+          mitigation: 'Lock critical vendors early and maintain at least one vetted backup vendor for each essential category.',
+          backup_plan: 'Activate the backup vendor roster with the agreed rates and scope if a primary vendor cancels.',
+          related_task_t_minus_days: 45,
+        }]
+      : []),
+    ...(totalBudget < 300000
+      ? [{
+          id: 'budget-buffer',
+          title: 'Thin contingency buffer',
+          category: 'budget' as const,
+          likelihood: 'medium' as const,
+          impact: 'medium' as const,
+          mitigation: 'Reserve at least 5% of the budget for weather, transport, and last-minute vendor changes.',
+          backup_plan: 'De-scope non-essential decor or entertainment before cutting catering, safety, or permissions.',
+          related_task_t_minus_days: 30,
+        }]
+      : []),
   ];
 }
 
@@ -653,10 +704,10 @@ export function applySmartReplan(
   if (updated.ideas.length > 20) updated.ideas = updated.ideas.slice(0, 20);
   if (updated.timeline.length > 30) updated.timeline = updated.timeline.slice(0, 30);
   if (updated.budget.length > 12) updated.budget = updated.budget.slice(0, 12);
-  if (!updated.risks || !Array.isArray(updated.risks)) {
+  if (!updated.risks || !Array.isArray(updated.risks) || updated.risks.length < 3) {
     updated.risks = generateDefaultRisks(updated.event_type, updated.city, updated.total_budget, updated.guests);
-  } else if (updated.risks.length > 20) {
-    updated.risks = updated.risks.slice(0, 20);
+  } else if (updated.risks.length > 6) {
+    updated.risks = updated.risks.slice(0, 6);
   }
 
   return updated;

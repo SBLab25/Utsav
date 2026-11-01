@@ -9,6 +9,7 @@ export type {
   VendorRequirement,
   IdeaItem,
   RiskItem,
+  Guest,
   EventPlan,
   PlanPatch,
 } from '../schemas/plan.ts';

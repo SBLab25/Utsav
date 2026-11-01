@@ -14,6 +14,7 @@ import {
   ShieldAlert,
   AlertCircle,
   HelpCircle,
+  Users,
 } from 'lucide-react';
 import type {
   EventPlan,
@@ -24,6 +25,7 @@ import type {
   VendorRequirement,
   IdeaItem,
   RiskItem,
+  Guest,
 } from './types/plan.ts';
 import { eventPlanSchema } from './schemas/plan.ts';
 import {
@@ -41,9 +43,13 @@ import { TimelineTab } from './components/TimelineTab.tsx';
 import { VendorsTab } from './components/VendorsTab.tsx';
 import { IdeasTab } from './components/IdeasTab.tsx';
 import { RisksTab } from './components/RisksTab.tsx';
+import { GuestsTab } from './components/GuestsTab.tsx';
 import { HistoryDrawer } from './components/HistoryDrawer.tsx';
 import { SkeletonLoader } from './components/SkeletonLoader.tsx';
 import { StatusBanner } from './components/StatusBanner.tsx';
+import { PrintPlanView } from './components/PrintPlanView.tsx';
+import { SharedPlanView } from './components/SharedPlanView.tsx';
+import { decodeSharedPlan } from './utils/sharePlan.ts';
 
 const DEFAULT_BRIEF = "Sister's sangeet, 150 guests, ₹6L, 14 Dec, Vizag, retro Bollywood";
 
@@ -107,27 +113,69 @@ const INITIAL_SANGEET_PLAN: EventPlan = {
   ],
   risks: [
     {
-      risk: "Sudden coastal rain or excessive humidity in Vizag affecting outdoor open-lawn sound & decor",
+      id: 'weather',
+      title: "Sudden coastal rain or humidity affects the outdoor lawn",
+      category: 'weather',
+      likelihood: 'medium',
+      impact: 'high',
       mitigation: "Pre-book waterproof transparent canopy covering the dance floor and ensure indoor banquet backup with hotel.",
-      severity: "medium",
+      backup_plan: "Move the dance floor and sound rig into the indoor banquet space using the pre-approved layout.",
+      related_task_t_minus_days: 7,
     },
     {
-      risk: "City police sound curfew strictly enforced after 10:00 PM for high-decibel DJ rig",
+      id: 'curfew',
+      title: "City police enforce the 10 PM sound curfew",
+      category: 'legal',
+      likelihood: 'high',
+      impact: 'high',
       mitigation: "Plan high-energy choreography face-offs between 7:30-10:00 PM, then shift to indoor acoustic after-party.",
-      severity: "high",
+      backup_plan: "Switch to an acoustic playlist and close amplified sound before the permitted cutoff.",
+      related_task_t_minus_days: 30,
     },
     {
-      risk: "High generator load from moving lights, stage LED wall, and sound amplifiers tripping local power",
+      id: 'power',
+      title: "Production power load trips during the show",
+      category: 'vendor',
+      likelihood: 'medium',
+      impact: 'high',
       mitigation: "Contract a dedicated 62.5 kVA silent diesel generator with automatic changeover switch exclusively for the AV rig.",
-      severity: "medium",
+      backup_plan: "Run the essential audio and safety lighting circuit while the production team isolates the failed load.",
+      related_task_t_minus_days: 7,
+    },
+    {
+      id: 'guest-overflow',
+      title: "Unexpected guests create catering bottlenecks",
+      category: 'logistics',
+      likelihood: 'medium',
+      impact: 'medium',
+      mitigation: "Hold a 10% buffer of plates and keep two quick-serve counters open during arrival.",
+      backup_plan: "Release reserved buffer tables and prioritize the fastest service stations for the first 30 minutes.",
+      related_task_t_minus_days: 15,
+    },
+    {
+      id: 'vendor-shortage',
+      title: "Peak wedding-season vendor shortage",
+      category: 'vendor',
+      likelihood: 'medium',
+      impact: 'high',
+      mitigation: "Confirm the DJ, decorator and caterer early, with one vetted backup vendor per category.",
+      backup_plan: "Activate the backup vendor roster at pre-agreed rates if a primary vendor cancels.",
+      related_task_t_minus_days: 45,
     },
   ],
+  guest_list: [],
   clarifying_question: null,
 };
 
-type TabType = 'budget' | 'timeline' | 'vendors' | 'ideas' | 'risks';
+type TabType = 'budget' | 'timeline' | 'vendors' | 'ideas' | 'risks' | 'guests';
 
 export default function App() {
+  const hasSharedHash = typeof window !== 'undefined' && window.location.hash.startsWith('#plan=');
+  const [sharedPlan] = useState<EventPlan | null>(() => {
+    if (!hasSharedHash) return null;
+    return decodeSharedPlan(window.location.hash.slice('#plan='.length));
+  });
+  const [isSharedView, setIsSharedView] = useState<boolean>(() => hasSharedHash && Boolean(decodeSharedPlan(window.location.hash.slice('#plan='.length))));
   const [plan, setPlan] = useState<EventPlan>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('utsav_current_plan') || localStorage.getItem('utsav_saved_plan');
@@ -138,7 +186,6 @@ export default function App() {
           if (validation.success) {
             return validation.data;
           } else {
-            console.warn('Discarding invalid saved plan from localStorage:', validation.error.issues);
             localStorage.removeItem('utsav_current_plan');
             localStorage.removeItem('utsav_saved_plan');
           }
@@ -211,7 +258,7 @@ export default function App() {
   const [showHistoryDrawer, setShowHistoryDrawer] = useState<boolean>(false);
   const [clarifyingAnswer, setClarifyingAnswer] = useState<string>('');
   const [announcement, setAnnouncement] = useState<string>('');
-  const tabList: TabType[] = ['budget', 'timeline', 'vendors', 'ideas', 'risks'];
+  const tabList: TabType[] = ['budget', 'timeline', 'vendors', 'ideas', 'risks', 'guests'];
   const tabRefs = useRef<{ [key: string]: HTMLButtonElement | null }>({});
 
   const handleTabKeyDown = (
@@ -246,6 +293,10 @@ export default function App() {
     }
     return false;
   });
+  const [language, setLanguage] = useState<'en' | 'hi' | 'te' | 'bn'>(() => {
+    const saved = typeof window !== 'undefined' ? localStorage.getItem('utsav_language') : null;
+    return saved === 'hi' || saved === 'te' || saved === 'bn' ? saved : 'en';
+  });
   const [planSource, setPlanSource] = useState<string | null>(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('utsav_plan_source');
@@ -270,6 +321,28 @@ export default function App() {
       localStorage.setItem('utsav_dark_mode', 'false');
     }
   }, [darkMode]);
+
+  useEffect(() => {
+    localStorage.setItem('utsav_language', language);
+    document.documentElement.lang = language;
+    const href = language === 'hi'
+      ? 'https://fonts.googleapis.com/css2?family=Noto+Sans+Devanagari:wght@400;500;600;700&display=swap'
+      : language === 'te'
+        ? 'https://fonts.googleapis.com/css2?family=Noto+Sans+Telugu:wght@400;500;600;700&display=swap'
+        : language === 'bn'
+          ? 'https://fonts.googleapis.com/css2?family=Noto+Sans+Bengali:wght@400;500;600;700&display=swap'
+          : null;
+    const existing = document.getElementById('utsav-language-font');
+    if (href) {
+      const link = (existing as HTMLLinkElement | null) || document.createElement('link');
+      link.id = 'utsav-language-font';
+      link.rel = 'stylesheet';
+      link.href = href;
+      if (!existing) document.head.appendChild(link);
+    } else {
+      existing?.remove();
+    }
+  }, [language]);
 
   // Initial confetti burst on first session
   useEffect(() => {
@@ -301,6 +374,23 @@ export default function App() {
     setHistory(updatedHistory);
     setHistoryIndex(0);
     localStorage.setItem('utsav_plan_history', JSON.stringify(updatedHistory));
+  };
+
+  const handleMakeOwnCopy = () => {
+    if (!sharedPlan) return;
+    window.history.replaceState(null, '', window.location.pathname);
+    setIsSharedView(false);
+    setPlan(sharedPlan);
+    localStorage.setItem('utsav_current_plan', JSON.stringify(sharedPlan));
+    const snapshot: PlanHistoryItem = {
+      id: `hist-${Date.now()}`,
+      plan: sharedPlan,
+      timestamp: Date.now(),
+      label: 'Copied Shared Plan',
+    };
+    setHistory([snapshot]);
+    localStorage.setItem('utsav_plan_history', JSON.stringify([snapshot]));
+    setAnnouncement('Shared plan copied. You can now edit your own plan.');
   };
 
   // Trigger celebration confetti
@@ -346,7 +436,7 @@ export default function App() {
       const response = await fetch('/api/plan/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ brief }),
+        body: JSON.stringify({ brief, language }),
         signal: controller.signal,
       });
 
@@ -398,6 +488,7 @@ export default function App() {
                     vendors: accumulatedPlan.vendors || [],
                     ideas: accumulatedPlan.ideas || [],
                     risks: accumulatedPlan.risks || [],
+                    guest_list: accumulatedPlan.guest_list || [],
                   };
 
                   setPlan((prev) => ({
@@ -478,7 +569,7 @@ export default function App() {
           const fallbackResp = await fetch('/api/plan', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ brief }),
+            body: JSON.stringify({ brief, language }),
           });
           if (!fallbackResp.ok) {
             const errData = await fallbackResp.json().catch(() => ({}));
@@ -548,6 +639,7 @@ export default function App() {
         body: JSON.stringify({
           currentPlan: plan,
           changeInstruction,
+          language,
         }),
       });
 
@@ -573,6 +665,7 @@ export default function App() {
       const normalizedUpdated: EventPlan = {
         ...updatedRaw,
         budget: normalizeBudgetPercentages(updatedRaw.budget, updatedRaw.total_budget),
+        guest_list: updatedRaw.guest_list ?? plan.guest_list,
       };
 
       // Compute diffs: build directly from patch for exact chips if available, or fallback to full plan diff
@@ -671,6 +764,40 @@ export default function App() {
     savePlanWithHistory(updatedPlan, 'Risk & Safeguards Kit Updated');
   };
 
+  const handleUpdateGuests = (newGuests: Guest[]) => {
+    if (!plan) return;
+    const updatedPlan: EventPlan = {
+      ...plan,
+      guest_list: newGuests,
+    };
+    savePlanWithHistory(updatedPlan, 'Guest List Updated');
+  };
+
+  const handleAddRiskMitigationToTimeline = (risk: RiskItem) => {
+    if (!plan) return;
+    const tMinusDays = risk.related_task_t_minus_days ?? 7;
+    const title = `Mitigation: ${risk.title}`;
+    if (plan.timeline.some((task) => task.title.toLowerCase() === title.toLowerCase())) {
+      setAnnouncement(`Mitigation already scheduled: ${risk.title}`);
+      return;
+    }
+    const updatedPlan: EventPlan = {
+      ...plan,
+      timeline: [
+        ...plan.timeline,
+        {
+          id: `risk-task-${risk.id || Date.now()}`,
+          t_minus_days: tMinusDays,
+          title,
+          owner: 'Risk Radar',
+          done: false,
+        },
+      ].sort((a, b) => b.t_minus_days - a.t_minus_days),
+    };
+    savePlanWithHistory(updatedPlan, `Risk Mitigation Added: ${risk.title}`);
+    setAnnouncement(`Added ${risk.title} mitigation to the timeline.`);
+  };
+
   // Import plan from JSON file
   const handleImportPlan = (importedPlan: EventPlan) => {
     savePlanWithHistory(importedPlan, `Imported: ${importedPlan.title || 'Saved Plan'}`);
@@ -727,13 +854,21 @@ export default function App() {
 
       {/* Top Header */}
       <Header
-        plan={plan}
+        plan={isSharedView && sharedPlan ? sharedPlan : plan}
         darkMode={darkMode}
         onToggleDarkMode={() => setDarkMode(!darkMode)}
         onOpenHistory={() => setShowHistoryDrawer(true)}
         historyCount={history.length}
         onImportPlan={handleImportPlan}
+        readOnly={isSharedView}
+        language={language}
+        onLanguageChange={setLanguage}
       />
+
+      {isSharedView && sharedPlan ? (
+        <SharedPlanView plan={sharedPlan} onMakeCopy={handleMakeOwnCopy} />
+      ) : (
+      <>
 
       {/* Main Workspace Body */}
       <main id="main" tabIndex={-1} className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 sm:py-8 focus:outline-none">
@@ -743,6 +878,11 @@ export default function App() {
           onRetry={handleRetry}
           isRetrying={isRetrying || isLoading || isReplanning}
         />
+        {hasSharedHash && !sharedPlan && (
+          <div className="mb-6 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-700 dark:text-red-300" role="alert">
+            This shared plan link is invalid or corrupted. You can continue with your local plan.
+          </div>
+        )}
 
         {/* Error notification banner */}
         {errorMessage && (
@@ -772,6 +912,8 @@ export default function App() {
               onGeneratePlan={handleGeneratePlan}
               isLoading={isLoading || isStreaming}
               onCancel={handleCancelGeneration}
+              language={language}
+              onLanguageChange={setLanguage}
             />
 
             {plan && (
@@ -887,7 +1029,7 @@ export default function App() {
                       ref={(el) => { tabRefs.current['budget'] = el; }}
                       onClick={() => setActiveTab('budget')}
                       onKeyDown={(e) => handleTabKeyDown(e, 'budget')}
-                      className={`inline-flex items-center gap-2 px-4 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                      className={`inline-flex items-center gap-2 px-4 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                         activeTab === 'budget'
                           ? 'bg-[#3B1F4A] text-white dark:bg-[#F5A623] dark:text-stone-950 shadow-xs'
                           : 'bg-stone-100 dark:bg-stone-900 text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-200'
@@ -906,7 +1048,7 @@ export default function App() {
                       ref={(el) => { tabRefs.current['timeline'] = el; }}
                       onClick={() => setActiveTab('timeline')}
                       onKeyDown={(e) => handleTabKeyDown(e, 'timeline')}
-                      className={`inline-flex items-center gap-2 px-4 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                      className={`inline-flex items-center gap-2 px-4 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                         activeTab === 'timeline'
                           ? 'bg-[#3B1F4A] text-white dark:bg-[#F5A623] dark:text-stone-950 shadow-xs'
                           : 'bg-stone-100 dark:bg-stone-900 text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-200'
@@ -928,7 +1070,7 @@ export default function App() {
                       ref={(el) => { tabRefs.current['vendors'] = el; }}
                       onClick={() => setActiveTab('vendors')}
                       onKeyDown={(e) => handleTabKeyDown(e, 'vendors')}
-                      className={`inline-flex items-center gap-2 px-4 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                      className={`inline-flex items-center gap-2 px-4 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                         activeTab === 'vendors'
                           ? 'bg-[#3B1F4A] text-white dark:bg-[#F5A623] dark:text-stone-950 shadow-xs'
                           : 'bg-stone-100 dark:bg-stone-900 text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-200'
@@ -950,7 +1092,7 @@ export default function App() {
                       ref={(el) => { tabRefs.current['ideas'] = el; }}
                       onClick={() => setActiveTab('ideas')}
                       onKeyDown={(e) => handleTabKeyDown(e, 'ideas')}
-                      className={`inline-flex items-center gap-2 px-4 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                      className={`inline-flex items-center gap-2 px-4 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                         activeTab === 'ideas'
                           ? 'bg-[#3B1F4A] text-white dark:bg-[#F5A623] dark:text-stone-950 shadow-xs'
                           : 'bg-stone-100 dark:bg-stone-900 text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-200'
@@ -972,7 +1114,7 @@ export default function App() {
                       ref={(el) => { tabRefs.current['risks'] = el; }}
                       onClick={() => setActiveTab('risks')}
                       onKeyDown={(e) => handleTabKeyDown(e, 'risks')}
-                      className={`inline-flex items-center gap-2 px-4 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                      className={`inline-flex items-center gap-2 px-4 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                         activeTab === 'risks'
                           ? 'bg-[#3B1F4A] text-white dark:bg-[#F5A623] dark:text-stone-950 shadow-xs'
                           : 'bg-stone-100 dark:bg-stone-900 text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-200'
@@ -984,9 +1126,28 @@ export default function App() {
                     >
                       <ShieldAlert className="w-4 h-4" />
                       <span>
-                        Risks & Safeguards ({plan.risks ? plan.risks.length : 0})
+                        Risk Radar ({plan.risks ? plan.risks.length : 0})
                         {isStreaming && !loadedSections.risks && ' ⏳'}
                       </span>
+                    </button>
+
+                    <button
+                      id="tab-guests"
+                      ref={(el) => { tabRefs.current['guests'] = el; }}
+                      onClick={() => setActiveTab('guests')}
+                      onKeyDown={(e) => handleTabKeyDown(e, 'guests')}
+                      className={`inline-flex items-center gap-2 px-4 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
+                        activeTab === 'guests'
+                          ? 'bg-[#3B1F4A] text-white dark:bg-[#F5A623] dark:text-stone-950 shadow-xs'
+                          : 'bg-stone-100 dark:bg-stone-900 text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-200'
+                      }`}
+                      role="tab"
+                      aria-controls="panel-guests"
+                      aria-selected={activeTab === 'guests'}
+                      tabIndex={activeTab === 'guests' ? 0 : -1}
+                    >
+                      <Users className="w-4 h-4" />
+                      <span>Guests ({plan.guest_list?.length || 0})</span>
                     </button>
                   </div>
                 </div>
@@ -1057,6 +1218,7 @@ export default function App() {
                         vendors={plan.vendors || []}
                         city={plan.city}
                         onUpdateVendors={handleUpdateVendors}
+                        language={language}
                       />
                     )}
                   </div>
@@ -1080,6 +1242,7 @@ export default function App() {
                         ideas={plan.ideas || []}
                         eventTitle={plan.title}
                         onUpdateIdeas={handleUpdateIdeas}
+                        language={language}
                       />
                     )}
                   </div>
@@ -1097,9 +1260,31 @@ export default function App() {
                       risks={plan.risks || []}
                       isLoading={isStreaming && !loadedSections.risks}
                       onUpdateRisks={handleUpdateRisks}
+                      onAddMitigationToTimeline={handleAddRiskMitigationToTimeline}
                     />
                   </div>
                 )}
+
+                {activeTab === 'guests' && (
+                  <div
+                    role="tabpanel"
+                    id="panel-guests"
+                    aria-labelledby="tab-guests"
+                    tabIndex={0}
+                    className="focus:outline-none"
+                  >
+                    <GuestsTab
+                      guests={plan.guest_list || []}
+                      planGuests={plan.guests}
+                      eventTitle={plan.title}
+                      ideas={plan.ideas || []}
+                      onUpdateGuests={handleUpdateGuests}
+                      onRequestReplan={handleReplan}
+                    />
+                  </div>
+                )}
+
+                <PrintPlanView plan={plan} />
               </div>
             )}
           </div>
@@ -1115,6 +1300,8 @@ export default function App() {
         onClose={() => setShowHistoryDrawer(false)}
         onClearHistory={handleClearHistory}
       />
+      </>
+      )}
     </div>
   );
 }

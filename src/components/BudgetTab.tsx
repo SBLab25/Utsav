@@ -344,7 +344,7 @@ export const BudgetTab: React.FC<BudgetTabProps> = ({
               return (
                 <div
                   key={item.category}
-                  className={`p-3.5 rounded-xl border transition-all ${
+                  className={`p-3.5 rounded-xl border transition-colors ${
                     item.locked
                       ? 'bg-amber-500/[0.04] dark:bg-amber-500/[0.06] border-[#F5A623]/40 shadow-xs'
                       : 'bg-white dark:bg-[#23152C] border-stone-200/80 dark:border-stone-800 hover:border-stone-300 dark:hover:border-stone-700'
@@ -424,7 +424,7 @@ export const BudgetTab: React.FC<BudgetTabProps> = ({
                   {/* Progress bar */}
                   <div className="mt-2.5 w-full bg-stone-100 dark:bg-stone-800 h-1.5 rounded-full overflow-hidden">
                     <div
-                      className="h-full rounded-full transition-all duration-300"
+                      className="h-full rounded-full transition-colors duration-300"
                       style={{
                         width: `${Math.min(100, item.pct)}%`,
                         backgroundColor: color,

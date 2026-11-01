@@ -33,6 +33,9 @@ Whether planning a traditional multi-day Indian wedding with Sangeet and Haldi c
 3. **Vendor Vetting Guides** tailored to city tiers with realistic price ranges, red flags, crucial vetting questions, and copyable outreach templates.
 4. **Curated Celebration Inspirations** including themes, regional menus, decor concepts, entertainment, and copy-paste WhatsApp RSVP templates.
 5. **Living Re-Planning Engine** that recalculates the plan when constraints change ("add 50 guests", "reduce budget by ₹1L", "make it eco-friendly") while highlighting exactly what changed with visual diff chips.
+6. **Risk Radar** with likelihood-impact mapping, mitigations, backup plans, and timeline actions.
+7. **Guest management** with RSVP statuses, dietary summaries, CSV import/export, and headcount-linked re-planning.
+8. **Sharing and integrations** with privacy-safe compressed links, print/PDF output, Google Calendar, Google Maps, WhatsApp, and multilingual generated content.
 
 ---
 
@@ -178,7 +181,7 @@ npm start
 
 ## Testing
 
-Utsav includes 43+ comprehensive tests across unit logic, server endpoints, and automated accessibility verification:
+Utsav includes 62 comprehensive tests across unit logic, server endpoints, component interactions, sharing/privacy behavior, and automated accessibility verification:
 
 ```bash
 # Run all tests

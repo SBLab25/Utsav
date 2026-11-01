@@ -11,6 +11,8 @@ interface BriefInputProps {
   onGeneratePlan: (brief: string) => void;
   isLoading: boolean;
   onCancel?: () => void;
+  language?: 'en' | 'hi' | 'te' | 'bn';
+  onLanguageChange?: (language: 'en' | 'hi' | 'te' | 'bn') => void;
 }
 
 const EXAMPLE_BRIEFS = [
@@ -25,6 +27,8 @@ export const BriefInput: React.FC<BriefInputProps> = ({
   onGeneratePlan,
   isLoading,
   onCancel,
+  language = 'en',
+  onLanguageChange = () => {},
 }) => {
   const [brief, setBrief] = useState(initialBrief);
   const [isListening, setIsListening] = useState(false);
@@ -98,6 +102,10 @@ export const BriefInput: React.FC<BriefInputProps> = ({
   return (
     <div className="bg-white/90 dark:bg-[#23152C]/90 rounded-2xl border border-stone-200/90 dark:border-stone-800 p-5 shadow-xs space-y-4">
       <div className="flex items-center justify-between">
+        <label htmlFor="brief-language" className="text-xs font-semibold text-stone-500">Content language</label>
+        <select id="brief-language" value={language} onChange={(e) => onLanguageChange(e.target.value as 'en' | 'hi' | 'te' | 'bn')} className="rounded-lg border border-stone-200 bg-white px-2 py-1 text-xs dark:border-stone-700 dark:bg-stone-900">
+          <option value="en">English</option><option value="hi">Hindi</option><option value="te">Telugu</option><option value="bn">Bengali</option>
+        </select>
         <div>
           <h2 className="font-serif text-lg font-bold text-[#3B1F4A] dark:text-[#FFF8EE]">
             Event Brief
@@ -111,7 +119,7 @@ export const BriefInput: React.FC<BriefInputProps> = ({
           <button
             type="button"
             onClick={toggleListening}
-            className={`p-2.5 rounded-xl transition-all cursor-pointer ${
+            className={`p-2.5 rounded-xl transition-colors cursor-pointer ${
               isListening
                 ? 'bg-red-500 text-white animate-pulse shadow-md ring-2 ring-red-400'
                 : 'bg-stone-100 hover:bg-stone-200 dark:bg-stone-800 dark:hover:bg-stone-700 text-stone-700 dark:text-stone-300'
@@ -133,7 +141,7 @@ export const BriefInput: React.FC<BriefInputProps> = ({
             maxLength={500}
             required
             placeholder="e.g., Sister's sangeet, 150 guests, ₹6L, 14 Dec, Vizag, retro Bollywood"
-            className="w-full px-3.5 py-2.5 text-xs sm:text-sm rounded-xl border border-stone-200 dark:border-stone-700 bg-stone-50/60 dark:bg-stone-900/60 text-stone-900 dark:text-stone-100 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-[#F5A623] focus:border-transparent transition-all resize-none"
+            className="w-full px-3.5 py-2.5 text-xs sm:text-sm rounded-xl border border-stone-200 dark:border-stone-700 bg-stone-50/60 dark:bg-stone-900/60 text-stone-900 dark:text-stone-100 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-[#F5A623] focus:border-transparent transition-colors resize-none"
             aria-label="Event brief description"
           />
 
@@ -172,7 +180,7 @@ export const BriefInput: React.FC<BriefInputProps> = ({
           <button
             type="submit"
             disabled={isLoading || !brief.trim()}
-            className="flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-[#3B1F4A] hover:bg-[#2C1638] text-[#FFF8EE] dark:bg-[#F5A623] dark:hover:bg-[#E59815] dark:text-stone-950 font-semibold text-xs sm:text-sm shadow-xs disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
+            className="flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-[#3B1F4A] hover:bg-[#2C1638] text-[#FFF8EE] dark:bg-[#F5A623] dark:hover:bg-[#E59815] dark:text-stone-950 font-semibold text-xs sm:text-sm shadow-xs disabled:opacity-50 disabled:cursor-not-allowed transition-colors cursor-pointer"
           >
             {isLoading ? (
               <>

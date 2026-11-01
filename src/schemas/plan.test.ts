@@ -42,6 +42,12 @@ const SAMPLE_VALID_PLAN = {
   ideas: [
     { category: "theme", title: "Retro Disco", description: "Bell-bottoms and vinyl records." },
   ],
+  risks: [
+    { id: 'rain', title: 'Rain', category: 'weather', likelihood: 'medium', impact: 'high', mitigation: 'Use a canopy', backup_plan: 'Move indoors' },
+    { id: 'curfew', title: 'Curfew', category: 'legal', likelihood: 'high', impact: 'high', mitigation: 'Get a permit', backup_plan: 'Use acoustic music' },
+    { id: 'overflow', title: 'Overflow', category: 'logistics', likelihood: 'medium', impact: 'medium', mitigation: 'Keep buffer plates', backup_plan: 'Open a second counter' },
+  ],
+  guest_list: [],
   clarifying_question: null,
 };
 
@@ -100,8 +106,27 @@ describe('planSchema', () => {
     expect(eventPlanSchema.safeParse(longDesc).success).toBe(false);
   });
 
+  it('eventPlanSchema requires 3 to 6 structured Risk Radar items', () => {
+    const tooFew = { ...SAMPLE_VALID_PLAN, risks: SAMPLE_VALID_PLAN.risks.slice(0, 2) };
+    const tooMany = {
+      ...SAMPLE_VALID_PLAN,
+      risks: [
+        ...SAMPLE_VALID_PLAN.risks,
+        SAMPLE_VALID_PLAN.risks[0],
+        SAMPLE_VALID_PLAN.risks[1],
+        SAMPLE_VALID_PLAN.risks[2],
+        SAMPLE_VALID_PLAN.risks[0],
+      ],
+    };
+    expect(eventPlanSchema.safeParse(tooFew).success).toBe(false);
+    expect(eventPlanSchema.safeParse(tooMany).success).toBe(false);
+    expect(eventPlanSchema.safeParse(SAMPLE_VALID_PLAN).success).toBe(true);
+  });
+
   it('planRequestSchema validates brief correctly', () => {
     expect(planRequestSchema.safeParse({ brief: 'Sister wedding' }).success).toBe(true);
+    expect(planRequestSchema.parse({ brief: 'Sister wedding', language: 'hi' }).language).toBe('hi');
+    expect(planRequestSchema.safeParse({ brief: 'Sister wedding', language: 'fr' }).success).toBe(false);
     expect(planRequestSchema.safeParse({ brief: '' }).success).toBe(false);
     expect(planRequestSchema.safeParse({}).success).toBe(false);
   });

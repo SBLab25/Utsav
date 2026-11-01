@@ -11,6 +11,16 @@
 @layer base {
   body {
     font-family: var(--font-sans);
+    overflow-x: hidden;
+    touch-action: manipulation;
+  }
+
+  html {
+    color-scheme: light;
+  }
+
+  html.dark {
+    color-scheme: dark;
   }
   
   h1, h2, h3, h4, .font-display {
@@ -41,9 +51,64 @@
   }
 }
 
+.print-plan {
+  display: none;
+}
+
 @media print {
   .no-print {
     display: none !important;
+  }
+  body * {
+    visibility: hidden !important;
+  }
+  .print-plan,
+  .print-plan * {
+    visibility: visible !important;
+  }
+  .print-plan {
+    display: block !important;
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    padding: 0.4in;
+    background: white !important;
+    color: black !important;
+    font-family: Arial, sans-serif;
+  }
+  .print-plan h1 {
+    font-size: 24pt;
+    margin: 0 0 6pt;
+  }
+  .print-plan h2 {
+    font-size: 14pt;
+    margin: 18pt 0 6pt;
+    border-bottom: 1px solid #999;
+    padding-bottom: 3pt;
+  }
+  .print-plan p,
+  .print-plan li,
+  .print-plan td,
+  .print-plan th {
+    font-size: 9pt;
+  }
+  .print-plan table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 10pt;
+  }
+  .print-plan th,
+  .print-plan td {
+    border: 1px solid #bbb;
+    padding: 4pt;
+    text-align: left;
+    vertical-align: top;
+  }
+  .print-plan th {
+    background: #f2f2f2 !important;
+  }
+  .print-plan ul {
+    padding-left: 18pt;
   }
   .print-only {
     display: block !important;

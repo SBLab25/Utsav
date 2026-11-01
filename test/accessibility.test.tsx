@@ -69,6 +69,11 @@ const SAMPLE_PLAN: EventPlan = {
   timeline: SAMPLE_TIMELINE,
   vendors: SAMPLE_VENDORS,
   ideas: SAMPLE_IDEAS,
+  risks: [
+    { id: 'rain', title: 'Rain', category: 'weather', likelihood: 'medium', impact: 'high', mitigation: 'Use a canopy', backup_plan: 'Move indoors' },
+    { id: 'curfew', title: 'Curfew', category: 'legal', likelihood: 'high', impact: 'high', mitigation: 'Get a permit', backup_plan: 'Use acoustic music' },
+    { id: 'overflow', title: 'Overflow', category: 'logistics', likelihood: 'medium', impact: 'medium', mitigation: 'Keep buffer plates', backup_plan: 'Open a second counter' },
+  ],
 };
 
 const SAMPLE_HISTORY: PlanHistoryItem[] = [

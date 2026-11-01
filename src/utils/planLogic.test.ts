@@ -10,6 +10,8 @@ import {
   recalculateBudgetWithLocked,
   computePlanDiff,
   generateICS,
+  generateGoogleCalendarUrl,
+  escapeIcsText,
   generateWhatsAppSummary,
   adjustCategoryPercentage,
   addBudgetCategory,
@@ -18,6 +20,12 @@ import {
   computeDiffsFromPatch,
 } from './planLogic.ts';
 import type { BudgetItem, EventPlan, PlanPatch } from '../types/plan.ts';
+
+const TEST_RISKS = [
+  { id: 'rain', title: 'Rain', category: 'weather' as const, likelihood: 'medium' as const, impact: 'high' as const, mitigation: 'Use a canopy', backup_plan: 'Move indoors' },
+  { id: 'curfew', title: 'Curfew', category: 'legal' as const, likelihood: 'high' as const, impact: 'high' as const, mitigation: 'Get a permit', backup_plan: 'Use acoustic music' },
+  { id: 'overflow', title: 'Overflow', category: 'logistics' as const, likelihood: 'medium' as const, impact: 'medium' as const, mitigation: 'Keep buffer plates', backup_plan: 'Open a second counter' },
+];
 
 describe('planLogic', () => {
   it('formatINR formats compact and full Indian rupee numbers correctly', () => {
@@ -80,6 +88,7 @@ describe('planLogic', () => {
       timeline: [{ t_minus_days: 60, title: 'Book Venue', owner: 'Bride', done: false }],
       vendors: [{ type: 'DJ', est_low: 25000, est_high: 40000, questions: [], red_flags: [], outreach_message: '' }],
       ideas: [],
+      risks: TEST_RISKS,
       clarifying_question: null,
     };
 
@@ -115,6 +124,7 @@ describe('planLogic', () => {
 
   it('generateICS outputs valid iCalendar structure', () => {
     const plan: EventPlan = {
+      id: 'silver-jubilee',
       title: 'Silver Jubilee',
       event_type: 'anniversary',
       event_date: '2026-11-20',
@@ -126,6 +136,7 @@ describe('planLogic', () => {
       timeline: [{ t_minus_days: 30, title: 'Book Caterer', owner: 'Family', done: false }],
       vendors: [],
       ideas: [],
+      risks: TEST_RISKS,
       clarifying_question: null,
     };
 
@@ -134,6 +145,50 @@ describe('planLogic', () => {
     expect(ics).toContain('END:VCALENDAR');
     expect(ics).toContain('SUMMARY:🎉 Silver Jubilee');
     expect(ics).toContain('[T-30] Book Caterer');
+    expect(ics).toContain('[Risk Radar] Rain');
+    expect(ics).toContain('UID:utsav-silver-jubilee-task-0@utsav.app');
+    expect(ics).toContain('DTSTART;VALUE=DATE:20261021');
+    expect(ics).toContain('DTEND;VALUE=DATE:20261022');
+  });
+
+  it('escapes RFC 5545 text and folds long UTF-8 lines', () => {
+    expect(escapeIcsText('a,b;c\\d\ne')).toBe('a\\,b\\;c\\\\d\\ne');
+    const longPlan: EventPlan = {
+      id: 'long-plan',
+      title: 'A'.repeat(140),
+      event_type: 'birthday',
+      event_date: '2026-11-20',
+      guests: 10,
+      total_budget: 10000,
+      city: 'Pune, Maharashtra',
+      theme: 'Theme; with, punctuation',
+      budget: [],
+      timeline: [],
+      vendors: [],
+      ideas: [],
+      risks: TEST_RISKS,
+      clarifying_question: null,
+    };
+    const ics = generateICS(longPlan);
+    const summaryLines = ics.split('\r\n').filter((line) => line.startsWith('SUMMARY:') || line.startsWith(' '));
+    expect(summaryLines.length).toBeGreaterThan(1);
+    expect(summaryLines.every((line) => new TextEncoder().encode(line).length <= 75)).toBe(true);
+    expect(ics).toContain('Pune\\, Maharashtra');
+  });
+
+  it('builds an encoded all-day Google Calendar template URL', () => {
+    const url = generateGoogleCalendarUrl(
+      'Sister, Sangeet',
+      '2026-12-14',
+      'Bring a gift; RSVP\nby Dec 1',
+      'Vizag'
+    );
+    const parsed = new URL(url);
+    expect(parsed.origin + parsed.pathname).toBe('https://calendar.google.com/calendar/render');
+    expect(parsed.searchParams.get('action')).toBe('TEMPLATE');
+    expect(parsed.searchParams.get('dates')).toBe('20261214/20261215');
+    expect(parsed.searchParams.get('text')).toBe('Sister, Sangeet');
+    expect(parsed.searchParams.get('details')).toBe('Bring a gift; RSVP\nby Dec 1');
   });
 
   it('generateWhatsAppSummary creates formatted message with emojis and bold', () => {
@@ -149,6 +204,7 @@ describe('planLogic', () => {
       timeline: [{ t_minus_days: 30, title: 'Choreography', owner: 'Me', done: true }],
       vendors: [],
       ideas: [],
+      risks: TEST_RISKS,
       clarifying_question: null,
     };
 
@@ -157,6 +213,8 @@ describe('planLogic', () => {
     expect(wa).toContain('₹6,00,000');
     expect(wa).toContain('Vizag');
     expect(wa).toContain('Retro Bollywood');
+    expect(wa).toContain('Risk Radar');
+    expect(wa).toContain('Mitigation: Use a canopy');
   });
 
   it('adjustCategoryPercentage adjusts target category while keeping total sum at 100', () => {
@@ -229,6 +287,7 @@ describe('planLogic', () => {
       ideas: [
         { category: 'theme', title: 'Disco', description: 'Retro 80s' },
       ],
+      risks: TEST_RISKS,
       clarifying_question: null,
     };
 
@@ -305,6 +364,7 @@ describe('planLogic', () => {
       timeline: [],
       vendors: [],
       ideas: [],
+      risks: TEST_RISKS,
     };
 
     const patch: PlanPatch = {
