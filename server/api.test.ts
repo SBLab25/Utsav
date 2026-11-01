@@ -5,7 +5,8 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import request from 'supertest';
-import { app, setCustomGenAIClient, resetCustomGenAIClient } from './app.ts';
+import { app, getGenAIClient, setCustomGenAIClient, resetCustomGenAIClient } from './app.ts';
+import { callGeminiAndValidate, clearGeminiCache } from './gemini.ts';
 
 const VALID_MOCK_PLAN = {
   title: "Sister's Retro Bollywood Sangeet",
@@ -55,6 +56,80 @@ describe('server/api.test.ts', () => {
   afterEach(() => {
     resetCustomGenAIClient();
     vi.restoreAllMocks();
+  });
+
+  it('tries configured Gemini models in order and returns model metadata', async () => {
+    const previousModels = process.env.GEMINI_MODEL;
+    process.env.GEMINI_MODEL = 'gemini-first,gemini-second';
+    const calls: string[] = [];
+    setCustomGenAIClient({
+      models: {
+        generateContent: vi.fn().mockImplementation(({ model }: { model?: string }) => {
+          calls.push(model || '');
+          if (model === 'gemini-first') return Promise.reject(new Error('model unavailable'));
+          return Promise.resolve({ text: JSON.stringify(VALID_MOCK_PLAN) });
+        }),
+      },
+    });
+
+    try {
+      const result = await callGeminiAndValidate(getGenAIClient(), 'model-order-test', 1000);
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.model).toBe('gemini-second');
+        expect(calls).toEqual(['gemini-first', 'gemini-second']);
+      }
+    } finally {
+      if (previousModels === undefined) delete process.env.GEMINI_MODEL;
+      else process.env.GEMINI_MODEL = previousModels;
+    }
+  });
+
+  it('aborts a slow mocked model within the timeout', async () => {
+    let aborted = false;
+    setCustomGenAIClient({
+      models: {
+        generateContent: vi.fn().mockImplementation(({ signal }: { signal?: AbortSignal }) => new Promise((_resolve, reject) => {
+          signal?.addEventListener('abort', () => {
+            aborted = true;
+            reject(new DOMException('The operation was aborted', 'AbortError'));
+          }, { once: true });
+        })),
+      },
+    });
+
+    const result = await callGeminiAndValidate(getGenAIClient(), 'abort-test', 20);
+    expect(result).toEqual({ success: false, reason: 'timeout' });
+    expect(aborted).toBe(true);
+  });
+
+  it('uses the in-memory cache on repeated successful calls', async () => {
+    clearGeminiCache();
+    const generateContent = vi.fn().mockResolvedValue({ text: JSON.stringify(VALID_MOCK_PLAN) });
+    setCustomGenAIClient({ models: { generateContent } });
+    const first = await callGeminiAndValidate(getGenAIClient(), 'cache-test', 1000);
+    const second = await callGeminiAndValidate(getGenAIClient(), 'cache-test', 1000);
+    expect(first.success).toBe(true);
+    expect(second.success).toBe(true);
+    expect(generateContent).toHaveBeenCalledTimes(1);
+  });
+
+  it('offline mode skips model calls and returns a starter plan', async () => {
+    const previousOffline = process.env.UTSAV_AI_OFFLINE;
+    const generateContent = vi.fn();
+    process.env.UTSAV_AI_OFFLINE = '1';
+    setCustomGenAIClient({ models: { generateContent } });
+    try {
+      const res = await request(app)
+        .post('/api/plan')
+        .send({ brief: 'Birthday, 20 guests' });
+      expect(res.status).toBe(200);
+      expect(res.body.source).toBe('starter');
+      expect(generateContent).not.toHaveBeenCalled();
+    } finally {
+      if (previousOffline === undefined) delete process.env.UTSAV_AI_OFFLINE;
+      else process.env.UTSAV_AI_OFFLINE = previousOffline;
+    }
   });
 
   it('valid brief returns 200 with source "gemini"', async () => {
@@ -190,7 +265,7 @@ describe('server/api.test.ts', () => {
     expect(res.body.error).toBe('Invalid request payload');
   });
 
-  it('Gemini timeout returns source "fallback-timeout"', async () => {
+  it('Gemini timeout returns a starter plan', async () => {
     const prevTimeout = process.env.GEMINI_TIMEOUT_MS;
     process.env.GEMINI_TIMEOUT_MS = '25'; // Fast 25ms timeout for testing
 
@@ -208,7 +283,7 @@ describe('server/api.test.ts', () => {
         .send({ brief: "Sister's sangeet, 150 guests, ₹6L, 14 Dec, Vizag" });
 
       expect(res.status).toBe(200);
-      expect(res.body.source).toBe('fallback-timeout');
+      expect(res.body.source).toBe('starter');
       expect(res.body.plan).toBeDefined();
       expect(res.body.plan.guests).toBe(150);
     } finally {
@@ -234,7 +309,7 @@ describe('server/api.test.ts', () => {
       .send({ brief: "Sister's sangeet, 150 guests, ₹6L, 14 Dec, Vizag" });
 
     expect(res.status).toBe(200);
-    expect(res.body.source).toBe('fallback-error');
+    expect(res.body.source).toBe('starter');
     expect(res.body.plan).toBeDefined();
     expect(res.body.plan.guests).toBe(150);
     expect(res.body.plan.city).toBe('Vizag');
@@ -377,7 +452,7 @@ describe('server/api.test.ts', () => {
     expect(raw).toContain('"section":"ideas"');
     expect(raw).toContain('"section":"risks"');
     expect(raw).toContain('"section":"done"');
-    expect(raw).toContain('"source":"fallback-nokey"');
+    expect(raw).toContain('"source":"starter"');
   });
 
   it('POST /api/plan/stream returns 400 for empty brief', async () => {

@@ -16,26 +16,141 @@ import {
   type PlanPatch,
 } from '../src/schemas/plan.ts';
 
-export const GEMINI_TIMEOUT_MS = parseInt(process.env.GEMINI_TIMEOUT_MS || '25000', 10);
-export const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+export const GEMINI_TIMEOUT_MS = parseInt(process.env.GEMINI_TIMEOUT_MS || '40000', 10);
+export const GEMINI_MODEL = 'gemini-2.5-flash';
 export const GROQ_MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
-const PROVIDER_TIMEOUT_MS = parseInt(process.env.AI_PROVIDER_TIMEOUT_MS || '20000', 10);
 const GROQ_ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
+const CACHE_TTL_MS = 30 * 60 * 1000;
+const CACHE_MAX_ENTRIES = 100;
 
 let mockGenAIClient: any = undefined;
+type CacheEntry = { expiresAt: number; value: unknown };
+const responseCache = new Map<string, CacheEntry>();
 
 export function setCustomGenAIClient(client: any) {
   mockGenAIClient = client;
+  clearGeminiCache();
 }
 
 export function resetCustomGenAIClient() {
   mockGenAIClient = undefined;
+  clearGeminiCache();
+}
+
+export function clearGeminiCache() {
+  responseCache.clear();
+}
+
+function cacheKey(endpoint: string, prompt: string): string {
+  let hash = 2166136261;
+  const input = `${endpoint}:${prompt.trim().replace(/\s+/g, ' ')}`;
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `${endpoint}:${(hash >>> 0).toString(16)}`;
+}
+
+function getCached<T>(key: string): T | undefined {
+  const entry = responseCache.get(key);
+  if (!entry) return undefined;
+  if (entry.expiresAt <= Date.now()) {
+    responseCache.delete(key);
+    return undefined;
+  }
+  responseCache.delete(key);
+  responseCache.set(key, entry);
+  return entry.value as T;
+}
+
+function setCached(key: string, value: unknown): void {
+  responseCache.delete(key);
+  responseCache.set(key, { expiresAt: Date.now() + CACHE_TTL_MS, value });
+  while (responseCache.size > CACHE_MAX_ENTRIES) {
+    const oldest = responseCache.keys().next().value;
+    if (oldest) responseCache.delete(oldest);
+    else break;
+  }
+}
+
+function configuredGeminiModels(): string[] {
+  const configured = (process.env.GEMINI_MODEL || '').split(',').map((model) => model.trim()).filter(Boolean);
+  return configured.length > 0 ? configured : [GEMINI_MODEL, 'gemini-2.0-flash-lite'];
+}
+
+function isRetryableError(error: unknown): boolean {
+  const source = error as { status?: number; statusCode?: number; message?: string };
+  const status = source?.status || source?.statusCode;
+  return status === 429 || (typeof status === 'number' && status >= 500) ||
+    /(?:status|HTTP)\s*(?:code\s*)?(?:429|5\d\d)\b/i.test(source?.message || '');
+}
+
+function delay(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener('abort', () => {
+      clearTimeout(timer);
+      reject(new DOMException('The operation was aborted', 'AbortError'));
+    }, { once: true });
+  });
+}
+
+async function callWithAbort<T>(operation: (signal: AbortSignal) => Promise<T>, timeoutMs: number): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), Math.max(1, timeoutMs));
+  try {
+    return await operation(controller.signal);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function generateReliable(
+  ai: any,
+  options: GenerateContentOptions,
+  timeoutMs: number,
+): Promise<any> {
+  if (ai.lastCall !== undefined) {
+    return callWithAbort<any>(
+      (signal) => ai.models.generateContent({ ...options, signal }),
+      timeoutMs,
+    );
+  }
+
+  const models = options.model ? [options.model] : configuredGeminiModels();
+  const startedAt = Date.now();
+  let lastError: unknown;
+  for (let modelIndex = 0; modelIndex < models.length; modelIndex += 1) {
+    const remaining = timeoutMs - (Date.now() - startedAt);
+    if (remaining <= 0) break;
+    const budget = Math.max(1, Math.floor(remaining / (models.length - modelIndex)));
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      try {
+        const result = await callWithAbort<any>(
+          (signal) => ai.models.generateContent({ ...options, model: models[modelIndex], signal }),
+          budget,
+        );
+        return Object.assign(result, {
+          __meta: { model: models[modelIndex], attempts: attempt },
+        });
+      } catch (error) {
+        lastError = error;
+        if (attempt === 1 && isRetryableError(error)) {
+          await delay(150);
+          continue;
+        }
+        break;
+      }
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error('No AI model succeeded');
 }
 
 type GenerateContentOptions = {
   model?: string;
   contents: unknown;
   config?: Record<string, unknown>;
+  signal?: AbortSignal;
 };
 
 type ProviderResponse = {
@@ -108,8 +223,6 @@ async function callGroq(options: GenerateContentOptions, apiKey: string): Promis
   const responseFormat = config.responseMimeType === 'application/json'
     ? { type: 'json_object' }
     : undefined;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), GEMINI_TIMEOUT_MS);
   try {
     const response = await fetch(GROQ_ENDPOINT, {
       method: 'POST',
@@ -127,7 +240,7 @@ async function callGroq(options: GenerateContentOptions, apiKey: string): Promis
         ...(tools ? { tools, tool_choice: 'auto' } : {}),
         ...(responseFormat ? { response_format: responseFormat } : {}),
       }),
-      signal: controller.signal,
+      signal: options.signal,
     });
     if (!response.ok) {
       const errorBody = await response.text();
@@ -153,7 +266,6 @@ async function callGroq(options: GenerateContentOptions, apiKey: string): Promis
     });
     return { text: message?.content || '', functionCalls };
   } finally {
-    clearTimeout(timer);
   }
 }
 
@@ -179,27 +291,45 @@ function createProviderClient(geminiKey: string | undefined, groqKey: string | u
     ...(groq ? [{ name: 'groq', client: groq }] : []),
   ];
   if (providers.length === 0) return null;
-  let preferredIndex = 0;
   let activeProvider = providers[0].name;
-  const generateContent = async (options: GenerateContentOptions, startIndex = preferredIndex) => {
+  let lastCall = { model: '', attempts: 0 };
+  const generateContent = async (options: GenerateContentOptions) => {
+    const startedAt = Date.now();
+    const overallTimeout = Math.max(1, parseInt(process.env.GEMINI_TIMEOUT_MS || String(GEMINI_TIMEOUT_MS), 10));
     let lastError: unknown;
-    for (let index = startIndex; index < providers.length; index += 1) {
+    for (let index = 0; index < providers.length; index += 1) {
       const provider = providers[index];
       try {
-        const providerCall = (provider.client as any).models.generateContent({
-          ...options,
-          model: provider.name === 'groq' ? GROQ_MODEL : options.model || GEMINI_MODEL,
-        });
-        let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-        const timeout = new Promise<never>((_, reject) => {
-          timeoutHandle = setTimeout(() => reject(new Error(`${provider.name} provider timed out`)), PROVIDER_TIMEOUT_MS);
-        });
-        const result = await Promise.race([providerCall, timeout]).finally(() => {
-          if (timeoutHandle) clearTimeout(timeoutHandle);
-        });
-        activeProvider = provider.name;
-        preferredIndex = 0;
-        return result;
+        const models = provider.name === 'gemini'
+          ? (options.model ? [options.model] : configuredGeminiModels())
+          : [GROQ_MODEL];
+        for (let modelIndex = 0; modelIndex < models.length; modelIndex += 1) {
+          const remaining = overallTimeout - (Date.now() - startedAt);
+          if (remaining <= 0) throw new Error(`${provider.name} provider timed out`);
+          const modelsLeft = models.length - modelIndex;
+          const modelBudget = Math.max(1, Math.floor(remaining / modelsLeft));
+          const attemptsForModel = 2;
+          for (let attempt = 1; attempt <= attemptsForModel; attempt += 1) {
+            try {
+              const result = await callWithAbort<any>(
+                (signal) => (provider.client as any).models.generateContent({
+                  ...options,
+                  model: models[modelIndex],
+                  signal,
+                }),
+                modelBudget,
+              );
+              activeProvider = provider.name;
+              lastCall = { model: models[modelIndex], attempts: attempt };
+              return result;
+            } catch (error) {
+              lastError = error;
+              const canRetry = attempt === 1 && isRetryableError(error);
+              if (!canRetry) break;
+              await delay(150, undefined);
+            }
+          }
+        }
       } catch (error) {
         lastError = error;
       }
@@ -210,8 +340,11 @@ function createProviderClient(geminiKey: string | undefined, groqKey: string | u
     get provider() {
       return activeProvider;
     },
+    get lastCall() {
+      return lastCall;
+    },
     preferFallback() {
-      preferredIndex = Math.min(1, providers.length - 1);
+      // Kept for route compatibility. Provider ordering is always deterministic.
     },
     models: {
       generateContent: (options: GenerateContentOptions) => generateContent(options),
@@ -227,7 +360,7 @@ export function getGenAIClient(): any {
 }
 
 export type GeminiCallResult =
-  | { success: true; plan: EventPlan }
+  | { success: true; plan: EventPlan; data: EventPlan; model?: string; attempts?: number }
   | { success: false; reason: 'timeout' | 'validation-failed' | 'error' };
 
 export async function callGeminiAndValidate(
@@ -236,29 +369,21 @@ export async function callGeminiAndValidate(
   timeoutMs: number = GEMINI_TIMEOUT_MS,
   systemInstruction: string = SYSTEM_INSTRUCTION
 ): Promise<GeminiCallResult> {
+  const key = cacheKey('plan', prompt);
+  const cached = getCached<GeminiCallResult>(key);
+  if (cached?.success) return cached;
+  const startedAt = Date.now();
   try {
-    const modelToUse = process.env.GEMINI_MODEL || GEMINI_MODEL;
-    const geminiCall = ai.models.generateContent({
-      model: modelToUse,
-      contents: prompt,
-      config: {
-        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-        systemInstruction,
-        responseMimeType: 'application/json',
-        responseSchema: geminiResponseSchema,
-      },
-    });
-
-    const timeoutPromise = new Promise<'TIMEOUT'>((resolve) =>
-      setTimeout(() => resolve('TIMEOUT'), timeoutMs)
-    );
-
-    const raceResult = await Promise.race([geminiCall, timeoutPromise]);
-    if (raceResult === 'TIMEOUT') {
-      return { success: false, reason: 'timeout' };
-    }
-
-    const text = raceResult.text;
+    const result = await generateReliable(ai, {
+        contents: prompt,
+        config: {
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+          systemInstruction,
+          responseMimeType: 'application/json',
+          responseSchema: geminiResponseSchema,
+        },
+      }, timeoutMs);
+    const text = result.text;
     if (!text) {
       return { success: false, reason: 'error' };
     }
@@ -270,9 +395,21 @@ export async function callGeminiAndValidate(
       return { success: false, reason: 'validation-failed' };
     }
 
-    return { success: true, plan: sanitizeDraft(parsed) };
-  } catch (_err) {
-    return { success: false, reason: 'error' };
+    const plan = sanitizeDraft(parsed);
+    const success = {
+      success: true as const,
+      plan,
+      data: plan,
+      ...(result.__meta || ai.lastCall || {}),
+    };
+    setCached(key, success);
+    return success;
+  } catch (error) {
+    const source = error as { name?: string; message?: string };
+    return {
+      success: false,
+      reason: source.name === 'AbortError' || Date.now() - startedAt >= timeoutMs || /timed out|aborted/i.test(source.message || '') ? 'timeout' : 'error',
+    };
   }
 }
 
@@ -287,28 +424,16 @@ export async function callGeminiPatchAndValidate(
   systemInstruction: string = SYSTEM_INSTRUCTION
 ): Promise<GeminiPatchResult> {
   try {
-    const modelToUse = process.env.GEMINI_MODEL || GEMINI_MODEL;
-    const geminiCall = ai.models.generateContent({
-      model: modelToUse,
-      contents: prompt,
-      config: {
-        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-        systemInstruction,
-        responseMimeType: 'application/json',
-        responseSchema: geminiPlanPatchResponseSchema,
-      },
-    });
-
-    const timeoutPromise = new Promise<'TIMEOUT'>((resolve) =>
-      setTimeout(() => resolve('TIMEOUT'), timeoutMs)
-    );
-
-    const raceResult = await Promise.race([geminiCall, timeoutPromise]);
-    if (raceResult === 'TIMEOUT') {
-      return { success: false, reason: 'timeout' };
-    }
-
-    const text = raceResult.text;
+    const result = await generateReliable(ai, {
+        contents: prompt,
+        config: {
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+          systemInstruction,
+          responseMimeType: 'application/json',
+          responseSchema: geminiPlanPatchResponseSchema,
+        },
+      }, timeoutMs);
+    const text = result.text;
     if (!text) {
       return { success: false, reason: 'error' };
     }
@@ -326,8 +451,8 @@ export async function callGeminiPatchAndValidate(
     }
 
     return { success: false, reason: 'validation-failed' };
-  } catch (_err) {
-    return { success: false, reason: 'error' };
+  } catch (error) {
+    return { success: false, reason: error instanceof Error && /timed out|aborted/i.test(error.message) ? 'timeout' : 'error' };
   }
 }
 
@@ -344,28 +469,16 @@ export async function callGeminiSectionAndValidate<T>(
   systemInstruction: string = SYSTEM_INSTRUCTION
 ): Promise<GeminiSectionResult<T>> {
   try {
-    const modelToUse = process.env.GEMINI_MODEL || GEMINI_MODEL;
-    const geminiCall = ai.models.generateContent({
-      model: modelToUse,
-      contents: prompt,
-      config: {
-        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-        systemInstruction,
-        responseMimeType: 'application/json',
-        responseSchema: geminiSchema,
-      },
-    });
-
-    const timeoutPromise = new Promise<'TIMEOUT'>((resolve) =>
-      setTimeout(() => resolve('TIMEOUT'), timeoutMs)
-    );
-
-    const raceResult = await Promise.race([geminiCall, timeoutPromise]);
-    if (raceResult === 'TIMEOUT') {
-      return { success: false, reason: 'timeout' };
-    }
-
-    const text = raceResult.text;
+    const result = await generateReliable(ai, {
+        contents: prompt,
+        config: {
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+          systemInstruction,
+          responseMimeType: 'application/json',
+          responseSchema: geminiSchema,
+        },
+      }, timeoutMs);
+    const text = result.text;
     if (!text) {
       return { success: false, reason: 'error' };
     }
@@ -383,7 +496,7 @@ export async function callGeminiSectionAndValidate<T>(
     }
 
     return { success: false, reason: 'validation-failed' };
-  } catch (_err) {
-    return { success: false, reason: 'error' };
+  } catch (error) {
+    return { success: false, reason: error instanceof Error && /timed out|aborted/i.test(error.message) ? 'timeout' : 'error' };
   }
 }

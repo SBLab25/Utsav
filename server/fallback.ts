@@ -112,11 +112,7 @@ export function parseEventDate(text: string, referenceDate: Date = new Date()): 
     return `${chosenYear}-${mStr}-${dStr}`;
   }
 
-  const fallback = new Date(referenceDate.getTime() + 45 * 24 * 60 * 60 * 1000);
-  const fYear = fallback.getFullYear();
-  const fMonth = String(fallback.getMonth() + 1).padStart(2, '0');
-  const fDay = String(fallback.getDate()).padStart(2, '0');
-  return `${fYear}-${fMonth}-${fDay}`;
+  return 'Date to confirm';
 }
 
 /**
@@ -216,7 +212,7 @@ export function generateDefaultPlan(brief: string, referenceDate: Date = new Dat
     'Vizag', 'Goa', 'Delhi', 'Jaipur', 'Bengaluru', 'Mumbai', 'Pune', 'Hyderabad',
     'Chennai', 'Kolkata', 'Udaipur', 'Ahmedabad', 'Chandigarh', 'Indore', 'Lucknow'
   ];
-  let city = 'Delhi NCR';
+  let city = 'Location to confirm';
   for (const c of knownCities) {
     if (new RegExp(`\\b${c}\\b`, 'i').test(text)) {
       city = c;
@@ -228,7 +224,7 @@ export function generateDefaultPlan(brief: string, referenceDate: Date = new Dat
   const event_date = parseEventDate(text, referenceDate);
 
   // 6. Extract Theme strictly from brief keywords, or use generic celebration theme
-  let theme = 'Celebration & Festivities';
+  let theme = 'Theme to confirm';
   if (/retro\s*bollywood/i.test(textLower)) theme = 'Retro Bollywood';
   else if (/bollywood/i.test(textLower)) theme = 'Bollywood Glamour';
   else if (/eco-friendly|sustainable|green/i.test(textLower)) theme = 'Eco-Friendly & Sustainable';

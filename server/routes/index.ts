@@ -255,10 +255,10 @@ router.post('/plan/stream', async (req, res) => {
   };
 
   const { brief, language } = bodyValidation.data;
-  const timeoutMs = parseInt(process.env.GEMINI_TIMEOUT_MS || '25000', 10);
+  const timeoutMs = parseInt(process.env.GEMINI_TIMEOUT_MS || '40000', 10);
   const ai = getGenAIClient();
 
-  if (!ai) {
+  if (process.env.UTSAV_AI_OFFLINE === '1' || !ai) {
     // Fallback path when no API key
     const defaultPlan = generateDefaultPlan(brief);
     if (!aborted) {
@@ -276,7 +276,7 @@ router.post('/plan/stream', async (req, res) => {
           clarifying_question: defaultPlan.clarifying_question,
         },
         fallback: true,
-        source: 'fallback-nokey',
+        source: 'starter',
       });
       sendSSE({ section: 'timeline', data: defaultPlan.timeline, fallback: true });
       sendSSE({ section: 'vendors', data: defaultPlan.vendors, fallback: true });
@@ -328,7 +328,7 @@ router.post('/plan/stream', async (req, res) => {
       section: 'core',
       data: coreData,
       fallback: isCoreFallback,
-      source: isCoreFallback ? 'fallback-error' : (ai.provider || 'gemini'),
+      source: isCoreFallback ? 'starter' : (ai.provider || 'gemini'),
     });
 
     if (aborted) return;
@@ -507,40 +507,31 @@ router.post('/plan', async (req, res) => {
     const { brief, language } = bodyValidation.data;
 
     const ai = getGenAIClient();
-    if (!ai) {
+    if (process.env.UTSAV_AI_OFFLINE === '1' || !ai) {
       const plan = generateDefaultPlan(brief);
-      return res.json({ plan, model: 'smart-intake', source: 'fallback-nokey' });
+      return res.json({ plan, model: 'starter-template', attempts: 0, source: 'starter' });
     }
 
     const sanitizedBrief = sanitizeUserText(brief);
     const prompt = getIntakePrompt(sanitizedBrief, language as ContentLanguage);
 
-    const timeoutMs = parseInt(process.env.GEMINI_TIMEOUT_MS || '25000', 10);
-    const activeModel = ai.provider === 'groq'
-      ? (process.env.GROQ_MODEL || GROQ_MODEL)
-      : (process.env.GEMINI_MODEL || GEMINI_MODEL);
+    const timeoutMs = parseInt(process.env.GEMINI_TIMEOUT_MS || '40000', 10);
     let result = await callGeminiAndValidate(ai, prompt, timeoutMs, getSystemInstruction(language as ContentLanguage));
 
-    if (!result.success && result.reason === 'timeout') {
-      const plan = generateDefaultPlan(brief);
-      return res.json({ plan, model: 'smart-intake-instant', source: 'fallback-timeout' });
-    }
-
-    if (!result.success) {
-      ai.preferFallback?.();
-      result = await callGeminiAndValidate(ai, prompt, timeoutMs, getSystemInstruction(language as ContentLanguage));
-    }
-
     if (result.success) {
-      return res.json({ plan: result.plan, model: ai.provider === 'groq' ? (process.env.GROQ_MODEL || GROQ_MODEL) : activeModel, source: ai.provider || 'gemini' });
+      return res.json({
+        plan: result.data,
+        model: result.model || (ai.provider === 'groq' ? (process.env.GROQ_MODEL || GROQ_MODEL) : GEMINI_MODEL),
+        attempts: result.attempts || 1,
+        source: ai.provider || 'gemini',
+      });
     }
 
     const plan = generateDefaultPlan(brief);
-    const source = result.reason === 'timeout' ? 'fallback-timeout' : 'fallback-error';
-    return res.json({ plan, model: 'smart-fallback', source });
+    return res.json({ plan, model: 'starter-template', attempts: 0, source: 'starter' });
   } catch (_error) {
     const fallback = generateDefaultPlan(typeof req.body?.brief === 'string' ? req.body.brief : '');
-    return res.json({ plan: fallback, model: 'smart-recovery', source: 'fallback-error' });
+    return res.json({ plan: fallback, model: 'starter-template', attempts: 0, source: 'starter' });
   }
 });
 

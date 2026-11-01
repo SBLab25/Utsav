@@ -111,7 +111,7 @@ Utsav uses **Gemini 2.5 Flash** (`gemini-2.5-flash`) via the modern `@google/gen
 1. **Structured Outputs (`responseSchema`)**: Enforces strict JSON schemas directly in the model call without requiring post-hoc parsing heuristics or markdown stripping.
 2. **Thinking Configuration**: Leverages low thinking level (`ThinkingLevel.LOW`) for fast planning latency while retaining nuanced cultural and geographical context.
 3. **Delimiter-Isolated Prompts**: User briefs and re-plan instructions are sanitized and enclosed within unambiguous boundary markers (`<<<USER_EVENT_BRIEF>>>` and `<<<USER_CHANGE_INSTRUCTION>>>`).
-4. **Resilient Retry & Fallback**: If Gemini times out (configurable via `GEMINI_TIMEOUT_MS`) or returns invalid JSON, the server automatically retries once before gracefully degrading to the deterministic rule-based parser in `server/fallback.ts`. The response explicitly flags its origin (`gemini`, `fallback-timeout`, `fallback-error`, or `fallback-nokey`).
+4. **Resilient Retry & Fallback**: Gemini models are tried in the comma-separated `GEMINI_MODEL` order within one overall `GEMINI_TIMEOUT_MS` budget. Transient 429/5xx failures receive one short retry, slow calls are aborted, and invalid responses are not retried. If every model fails, or `UTSAV_AI_OFFLINE=1`, Utsav returns a deterministic starter plan with source `starter`; successful responses include the selected model and attempt count.
 
 ---
 
@@ -161,11 +161,11 @@ npm start
 | Variable | Description | Default | Required? |
 | :--- | :--- | :--- | :--- |
 | `GEMINI_API_KEY` | Optional Google Gemini API key; tried first when both are configured | None | No |
-| `GEMINI_MODEL` | Gemini model identifier | `gemini-2.5-flash` | No |
+| `GEMINI_MODEL` | Comma-separated Gemini model order | `gemini-2.5-flash,gemini-2.0-flash-lite` | No |
 | `GROQ_API_KEY` | Optional Groq API key; used directly or as Gemini fallback | None | No |
 | `GROQ_MODEL` | Groq model identifier | `openai/gpt-oss-120b` | No |
-| `GROQ_MODEL` | Groq model identifier | `llama-3.3-70b-versatile` | No |
-| `GEMINI_TIMEOUT_MS` | Gemini request timeout in milliseconds | `25000` (25s) | No |
+| `GEMINI_TIMEOUT_MS` | Overall Gemini/model fallback budget in milliseconds | `40000` (40s) | No |
+| `UTSAV_AI_OFFLINE` | Skip model calls and use the deterministic starter planner | `0` | No |
 | `PORT` | HTTP server port | `3000` | No |
 | `NODE_ENV` | Runtime environment (`development`, `production`, `test`) | `development` | No |
 

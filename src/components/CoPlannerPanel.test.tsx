@@ -55,4 +55,22 @@ describe('CoPlannerPanel', () => {
     expect(screen.getByLabelText('current budget')).toHaveTextContent('40000');
     vi.unstubAllGlobals();
   });
+
+  it('renders assistant markdown as structured text instead of showing formatting markers', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        reply: '**Budget check**\n\n* Decor is within its allocation.\n* Catering has room for the move.',
+        proposals: [],
+      }),
+    }));
+    render(<Harness />);
+    fireEvent.click(screen.getByRole('button', { name: /Move ₹20,000/i }));
+    await waitFor(() => expect(screen.getByText('Budget check')).toBeInTheDocument());
+    expect(screen.getByText('Budget check').tagName).toBe('STRONG');
+    expect(screen.getByText('Decor is within its allocation.')).toBeInTheDocument();
+    expect(screen.queryByText(/\*\*/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^\*/)).not.toBeInTheDocument();
+    vi.unstubAllGlobals();
+  });
 });

@@ -52,6 +52,7 @@ import { SharedPlanView } from './components/SharedPlanView.tsx';
 import { decodeSharedPlan } from './utils/sharePlan.ts';
 import type { PlanChange } from './schemas/changes.ts';
 import { CoPlannerPanel } from './components/CoPlannerPanel.tsx';
+import { StarterNotice } from './components/StarterNotice.tsx';
 
 const DEFAULT_BRIEF = "Sister's sangeet, 150 guests, ₹6L, 14 Dec, Vizag, retro Bollywood";
 
@@ -260,6 +261,7 @@ export default function App() {
   const [showHistoryDrawer, setShowHistoryDrawer] = useState<boolean>(false);
   const [clarifyingAnswer, setClarifyingAnswer] = useState<string>('');
   const [announcement, setAnnouncement] = useState<string>('');
+  const [planSource, setPlanSource] = useState<'gemini' | 'groq' | 'starter' | null>(null);
   const tabList: TabType[] = ['budget', 'timeline', 'vendors', 'ideas', 'risks', 'guests'];
   const tabRefs = useRef<{ [key: string]: HTMLButtonElement | null }>({});
 
@@ -417,6 +419,7 @@ export default function App() {
     setErrorMessage(null);
     setAnnouncement('Generating your celebration plan...');
     setLastAction({ type: 'plan', brief });
+    setPlanSource(null);
 
     // Abort previous in-flight generation if any
     abortControllerRef.current?.abort();
@@ -469,6 +472,9 @@ export default function App() {
                 const message = JSON.parse(jsonStr);
                 if (message.section === 'core') {
                   streamedAnySection = true;
+                  if (message.source === 'starter' || message.source === 'gemini' || message.source === 'groq') {
+                    setPlanSource(message.source);
+                  }
                   const coreData = message.data;
                   const normalizedBudget = normalizeBudgetPercentages(
                     coreData.budget || [],
@@ -592,6 +598,7 @@ export default function App() {
           const data = await fallbackResp.json();
           const validation = eventPlanSchema.safeParse(data.plan);
           if (validation.success) {
+            setPlanSource(data.source === 'gemini' || data.source === 'groq' || data.source === 'starter' ? data.source : 'starter');
             const normalized = {
               ...validation.data,
               budget: normalizeBudgetPercentages(validation.data.budget, validation.data.total_budget),
@@ -891,6 +898,16 @@ export default function App() {
           </div>
         )}
 
+        {planSource === 'starter' && (
+          <StarterNotice
+            onRedraft={() => {
+              const brief = lastAction?.type === 'plan' ? lastAction.brief : DEFAULT_BRIEF;
+              void handleGeneratePlan(brief);
+            }}
+            isLoading={isLoading || isStreaming}
+          />
+        )}
+
         {/* Error notification banner */}
         {errorMessage && (
           <div className="mb-6 p-4 rounded-2xl bg-red-500/10 border border-red-500/30 text-red-700 dark:text-red-400 flex items-start justify-between gap-3 animate-in fade-in">
@@ -944,6 +961,12 @@ export default function App() {
 
           {/* Right Column: Plan Board */}
           <div className="lg:col-span-6 min-w-0 space-y-6">
+            {planSource === 'gemini' && (
+              <div role="status" className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-800 dark:border-emerald-800/60 dark:bg-emerald-950/40 dark:text-emerald-300">
+                <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+                Planned by Gemini
+              </div>
+            )}
             {isLoading ? (
               <SkeletonLoader />
             ) : !plan ? (
