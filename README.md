@@ -77,9 +77,9 @@ graph TD
     subgraph Express Backend
         API --> Security[Helmet + Rate Limiting 30 req/15min + 100kb Cap]
         Security --> Sanitizer[Prompt Sanitizer & Injection Filter]
-        Sanitizer --> GeminiClient[Gemini Client /gemini-2.5-flash]
+        Sanitizer --> AIProviders[Gemini + Groq Provider Router]
         
-        GeminiClient -->|Structured JSON via responseSchema| LLM[(Google GenAI API)]
+        AIProviders -->|Structured JSON / tool calls| LLM[(Google Gemini or Groq API)]
         LLM -->|Candidate JSON Plan| Validator[Zod Schema Validator]
         
         Validator -->|Valid Plan| Response[Return Source: gemini]
@@ -134,9 +134,11 @@ Create a `.env` file from `.env.example`:
 ```bash
 cp .env.example .env
 ```
-Edit `.env`:
+Edit `.env` with at least one provider key:
 ```env
 GEMINI_API_KEY="your-gemini-api-key"
+# Or:
+GROQ_API_KEY="your-groq-api-key"
 PORT=3000
 ```
 
@@ -158,8 +160,10 @@ npm start
 
 | Variable | Description | Default | Required? |
 | :--- | :--- | :--- | :--- |
-| `GEMINI_API_KEY` | Google Gemini API key | None | Yes (falls back to offline parser without key) |
+| `GEMINI_API_KEY` | Optional Google Gemini API key; tried first when both are configured | None | No |
 | `GEMINI_MODEL` | Gemini model identifier | `gemini-2.5-flash` | No |
+| `GROQ_API_KEY` | Optional Groq API key; used directly or as Gemini fallback | None | No |
+| `GROQ_MODEL` | Groq model identifier | `llama-3.3-70b-versatile` | No |
 | `GEMINI_TIMEOUT_MS` | Gemini request timeout in milliseconds | `25000` (25s) | No |
 | `PORT` | HTTP server port | `3000` | No |
 | `NODE_ENV` | Runtime environment (`development`, `production`, `test`) | `development` | No |
@@ -183,7 +187,7 @@ npm start
 
 ## Testing
 
-Utsav includes 75 comprehensive tests across schema validation, unit logic, server endpoints, component interactions, sharing/privacy behavior, Co-planner proposals, and automated accessibility verification:
+Utsav includes 76 comprehensive tests across schema validation, unit logic, server endpoints, component interactions, sharing/privacy behavior, Co-planner proposals, provider integration, and automated accessibility verification:
 
 ```bash
 # Run all tests
@@ -248,7 +252,7 @@ curl http://localhost:3000/api/health
 ## Known Limitations
 
 - **Speech Recognition Support**: Voice input uses the Web Speech API (`webkitSpeechRecognition`), supported primarily in Chromium-based browsers (Chrome, Edge) and Safari. Fallback to standard text input is always available.
-- **Offline / Fallback Accuracy**: When operating without a `GEMINI_API_KEY` or during network timeouts, Utsav falls back to deterministic rule-based algorithms. Complex, highly nuanced multi-field replan queries are best served with an active Gemini connection.
+- **Provider fallback**: Utsav tries Gemini first when configured, retries with Groq when the Google request fails, and uses the deterministic rule-based planner when neither provider is configured or both fail. Complex, highly nuanced requests are best served with an active provider connection.
 - **Currency Default**: Default calculations and parsing are optimized for Indian Rupees (INR, Lakhs, Crores).
 
 ---

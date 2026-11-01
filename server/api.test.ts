@@ -77,6 +77,40 @@ describe('server/api.test.ts', () => {
     expect(res.body.plan.guests).toBe(150);
   });
 
+  it('uses Groq when a Groq key is configured and Gemini is unavailable', async () => {
+    const previousGeminiKey = process.env.GEMINI_API_KEY;
+    const previousGroqKey = process.env.GROQ_API_KEY;
+    process.env.GEMINI_API_KEY = '';
+    process.env.GROQ_API_KEY = 'test-groq-key';
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: JSON.stringify(VALID_MOCK_PLAN) } }],
+      }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    try {
+      const res = await request(app)
+        .post('/api/plan')
+        .send({ brief: "Sister's sangeet, 150 guests, ₹6L, 14 Dec, Vizag" });
+
+      expect(res.status).toBe(200);
+      expect(res.body.source).toBe('gemini');
+      expect(res.body.plan.title).toBe("Sister's Retro Bollywood Sangeet");
+      expect(fetchMock).toHaveBeenCalledWith(
+        'https://api.groq.com/openai/v1/chat/completions',
+        expect.objectContaining({ method: 'POST' })
+      );
+    } finally {
+      vi.unstubAllGlobals();
+      if (previousGeminiKey === undefined) delete process.env.GEMINI_API_KEY;
+      else process.env.GEMINI_API_KEY = previousGeminiKey;
+      if (previousGroqKey === undefined) delete process.env.GROQ_API_KEY;
+      else process.env.GROQ_API_KEY = previousGroqKey;
+    }
+  });
+
   it('empty brief returns 400', async () => {
     const res = await request(app)
       .post('/api/plan')

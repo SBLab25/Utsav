@@ -18,6 +18,9 @@ import {
 
 export const GEMINI_TIMEOUT_MS = parseInt(process.env.GEMINI_TIMEOUT_MS || '25000', 10);
 export const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+export const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
+const PROVIDER_TIMEOUT_MS = parseInt(process.env.AI_PROVIDER_TIMEOUT_MS || '8000', 10);
+const GROQ_ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
 
 let mockGenAIClient: any = undefined;
 
@@ -29,22 +32,167 @@ export function resetCustomGenAIClient() {
   mockGenAIClient = undefined;
 }
 
-export function getGenAIClient(): GoogleGenAI | null {
+type GenerateContentOptions = {
+  model?: string;
+  contents: unknown;
+  config?: Record<string, unknown>;
+};
+
+type ProviderResponse = {
+  text: string;
+  functionCalls?: Array<{ name: string; args: Record<string, unknown> }>;
+};
+
+function toOpenAIMessage(content: unknown): Array<{ role: string; content: string }> {
+  if (typeof content === 'string') return [{ role: 'user', content }];
+  if (!Array.isArray(content)) return [{ role: 'user', content: JSON.stringify(content) }];
+  return content.map((item) => {
+    const source = item as { role?: string; parts?: Array<{ text?: string }> };
+    return {
+      role: source.role === 'model' ? 'assistant' : source.role || 'user',
+      content: Array.isArray(source.parts)
+        ? source.parts.map((part) => part.text || '').join('\n')
+        : '',
+    };
+  });
+}
+
+function toOpenAITools(tools: unknown): unknown[] | undefined {
+  if (!Array.isArray(tools)) return undefined;
+  const declarations = tools.flatMap((tool) => {
+    const source = tool as { functionDeclarations?: Array<Record<string, unknown>> };
+    return source.functionDeclarations || [];
+  });
+  return declarations.map((declaration) => ({
+    type: 'function',
+    function: {
+      name: declaration.name,
+      description: declaration.description,
+      parameters: declaration.parameters,
+    },
+  }));
+}
+
+async function callGroq(options: GenerateContentOptions, apiKey: string): Promise<ProviderResponse> {
+  const config = options.config || {};
+  const systemInstruction = typeof config.systemInstruction === 'string'
+    ? config.systemInstruction
+    : '';
+  const schema = config.responseSchema;
+  const schemaInstruction = schema
+    ? `\nReturn only JSON matching this schema:\n${JSON.stringify(schema)}`
+    : '';
+  const messages = [
+    ...(systemInstruction ? [{ role: 'system', content: systemInstruction }] : []),
+    ...toOpenAIMessage(options.contents),
+  ];
+  const tools = toOpenAITools(config.tools);
+  const responseFormat = config.responseMimeType === 'application/json'
+    ? { type: 'json_object' }
+    : undefined;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), GEMINI_TIMEOUT_MS);
+  try {
+    const response = await fetch(GROQ_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: options.model || GROQ_MODEL,
+        messages: schemaInstruction
+          ? [...messages.slice(0, -1), { ...messages[messages.length - 1], content: `${messages[messages.length - 1].content}${schemaInstruction}` }]
+          : messages,
+        temperature: 0.2,
+        ...(tools ? { tools, tool_choice: 'auto' } : {}),
+        ...(responseFormat ? { response_format: responseFormat } : {}),
+      }),
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      throw new Error(`Groq request failed with status ${response.status}`);
+    }
+    const payload = await response.json() as {
+      choices?: Array<{
+        message?: {
+          content?: string | null;
+          tool_calls?: Array<{ function?: { name?: string; arguments?: string } }>;
+        };
+      }>;
+    };
+    const message = payload.choices?.[0]?.message;
+    const functionCalls = message?.tool_calls?.flatMap((call) => {
+      const name = call.function?.name;
+      if (!name) return [];
+      try {
+        return [{ name, args: JSON.parse(call.function?.arguments || '{}') as Record<string, unknown> }];
+      } catch {
+        return [];
+      }
+    });
+    return { text: message?.content || '', functionCalls };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function createGroqClient(apiKey: string) {
+  return {
+    provider: 'groq',
+    models: {
+      generateContent: (options: GenerateContentOptions) => callGroq(options, apiKey),
+    },
+  };
+}
+
+function createProviderClient(geminiKey: string | undefined, groqKey: string | undefined) {
+  const gemini = geminiKey && geminiKey !== 'MY_GEMINI_API_KEY'
+    ? new GoogleGenAI({
+        apiKey: geminiKey,
+        httpOptions: { headers: { 'User-Agent': 'aistudio-build' } },
+      })
+    : null;
+  const groq = groqKey && groqKey !== 'MY_GROQ_API_KEY' ? createGroqClient(groqKey) : null;
+  const providers = [
+    ...(gemini ? [{ name: 'gemini', client: gemini }] : []),
+    ...(groq ? [{ name: 'groq', client: groq }] : []),
+  ];
+  if (providers.length === 0) return null;
+  return {
+    provider: providers[0].name,
+    models: {
+      generateContent: async (options: GenerateContentOptions) => {
+        let lastError: unknown;
+        for (const provider of providers) {
+          try {
+            const providerCall = (provider.client as any).models.generateContent({
+              ...options,
+              model: provider.name === 'groq' ? GROQ_MODEL : options.model || GEMINI_MODEL,
+            });
+            let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+            const timeout = new Promise<never>((_, reject) => {
+              timeoutHandle = setTimeout(() => reject(new Error(`${provider.name} provider timed out`)), PROVIDER_TIMEOUT_MS);
+            });
+            const result = await Promise.race([providerCall, timeout]).finally(() => {
+              if (timeoutHandle) clearTimeout(timeoutHandle);
+            });
+            return result;
+          } catch (error) {
+            lastError = error;
+          }
+        }
+        throw lastError instanceof Error ? lastError : new Error('No AI provider available');
+      },
+    },
+  };
+}
+
+export function getGenAIClient(): any {
   if (mockGenAIClient !== undefined) {
     return mockGenAIClient;
   }
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
-    return null;
-  }
-  return new GoogleGenAI({
-    apiKey,
-    httpOptions: {
-      headers: {
-        'User-Agent': 'aistudio-build',
-      },
-    },
-  });
+  return createProviderClient(process.env.GEMINI_API_KEY, process.env.GROQ_API_KEY);
 }
 
 export type GeminiCallResult =
