@@ -4,8 +4,17 @@
  */
 
 import { GoogleGenAI, ThinkingLevel } from '@google/genai';
-import { geminiResponseSchema, SYSTEM_INSTRUCTION } from './prompts.ts';
-import { eventPlanSchema, type EventPlan } from '../src/schemas/plan.ts';
+import {
+  geminiResponseSchema,
+  geminiPlanPatchResponseSchema,
+  SYSTEM_INSTRUCTION,
+} from './prompts.ts';
+import {
+  eventPlanSchema,
+  planPatchSchema,
+  type EventPlan,
+  type PlanPatch,
+} from '../src/schemas/plan.ts';
 
 export const GEMINI_TIMEOUT_MS = parseInt(process.env.GEMINI_TIMEOUT_MS || '25000', 10);
 export const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
@@ -91,3 +100,114 @@ export async function callGeminiAndValidate(
     return { success: false, reason: 'error' };
   }
 }
+
+export type GeminiPatchResult =
+  | { success: true; patch: PlanPatch }
+  | { success: false; reason: 'timeout' | 'validation-failed' | 'error' };
+
+export async function callGeminiPatchAndValidate(
+  ai: any,
+  prompt: string,
+  timeoutMs: number = GEMINI_TIMEOUT_MS
+): Promise<GeminiPatchResult> {
+  try {
+    const modelToUse = process.env.GEMINI_MODEL || GEMINI_MODEL;
+    const geminiCall = ai.models.generateContent({
+      model: modelToUse,
+      contents: prompt,
+      config: {
+        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+        systemInstruction: SYSTEM_INSTRUCTION,
+        responseMimeType: 'application/json',
+        responseSchema: geminiPlanPatchResponseSchema,
+      },
+    });
+
+    const timeoutPromise = new Promise<'TIMEOUT'>((resolve) =>
+      setTimeout(() => resolve('TIMEOUT'), timeoutMs)
+    );
+
+    const raceResult = await Promise.race([geminiCall, timeoutPromise]);
+    if (raceResult === 'TIMEOUT') {
+      return { success: false, reason: 'timeout' };
+    }
+
+    const text = raceResult.text;
+    if (!text) {
+      return { success: false, reason: 'error' };
+    }
+
+    let parsed: any;
+    try {
+      parsed = JSON.parse(text);
+    } catch (_parseErr) {
+      return { success: false, reason: 'validation-failed' };
+    }
+
+    const validation = planPatchSchema.safeParse(parsed);
+    if (validation.success) {
+      return { success: true, patch: validation.data };
+    }
+
+    return { success: false, reason: 'validation-failed' };
+  } catch (_err) {
+    return { success: false, reason: 'error' };
+  }
+}
+
+export type GeminiSectionResult<T> =
+  | { success: true; data: T }
+  | { success: false; reason: 'timeout' | 'validation-failed' | 'error' };
+
+export async function callGeminiSectionAndValidate<T>(
+  ai: any,
+  prompt: string,
+  geminiSchema: any,
+  zodSchema: { safeParse: (data: any) => { success: true; data: T } | { success: false } },
+  timeoutMs: number = GEMINI_TIMEOUT_MS
+): Promise<GeminiSectionResult<T>> {
+  try {
+    const modelToUse = process.env.GEMINI_MODEL || GEMINI_MODEL;
+    const geminiCall = ai.models.generateContent({
+      model: modelToUse,
+      contents: prompt,
+      config: {
+        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+        systemInstruction: SYSTEM_INSTRUCTION,
+        responseMimeType: 'application/json',
+        responseSchema: geminiSchema,
+      },
+    });
+
+    const timeoutPromise = new Promise<'TIMEOUT'>((resolve) =>
+      setTimeout(() => resolve('TIMEOUT'), timeoutMs)
+    );
+
+    const raceResult = await Promise.race([geminiCall, timeoutPromise]);
+    if (raceResult === 'TIMEOUT') {
+      return { success: false, reason: 'timeout' };
+    }
+
+    const text = raceResult.text;
+    if (!text) {
+      return { success: false, reason: 'error' };
+    }
+
+    let parsed: any;
+    try {
+      parsed = JSON.parse(text);
+    } catch (_parseErr) {
+      return { success: false, reason: 'validation-failed' };
+    }
+
+    const validation = zodSchema.safeParse(parsed);
+    if (validation.success) {
+      return { success: true, data: validation.data };
+    }
+
+    return { success: false, reason: 'validation-failed' };
+  } catch (_err) {
+    return { success: false, reason: 'error' };
+  }
+}
+

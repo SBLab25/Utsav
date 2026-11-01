@@ -148,4 +148,167 @@ describe('server/api.test.ts', () => {
     expect(res.body.service).toBe('utsav-event-planner');
     expect(res.body.timestamp).toBeDefined();
   });
+
+  it('POST /api/replan returns 200 with source "gemini" and patch for valid PlanPatch', async () => {
+    const mockPatch = {
+      reason: 'Added 50 guests and scaled budget by ₹1L',
+      changes: {
+        guests: 200,
+        total_budget: 700000,
+      },
+      budget_changes: [],
+      tasks_added: [],
+      tasks_removed: [],
+      tasks_modified: [],
+      vendors_added: [],
+      vendors_removed: [],
+      ideas_added: [],
+    };
+
+    setCustomGenAIClient({
+      models: {
+        generateContent: vi.fn().mockResolvedValue({
+          text: JSON.stringify(mockPatch),
+        }),
+      },
+    });
+
+    const res = await request(app)
+      .post('/api/replan')
+      .send({
+        currentPlan: VALID_MOCK_PLAN,
+        changeInstruction: 'add 50 guests and increase budget to 7L',
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.source).toBe('gemini');
+    expect(res.body.plan).toBeDefined();
+    expect(res.body.plan.guests).toBe(200);
+    expect(res.body.plan.total_budget).toBe(700000);
+    expect(res.body.patch).toBeDefined();
+    expect(res.body.patch.reason).toBe('Added 50 guests and scaled budget by ₹1L');
+  });
+
+  it('POST /api/replan falls back to full plan if patch is invalid', async () => {
+    // First call for patch returns invalid JSON, second call for full plan returns valid plan
+    const updatedPlan = {
+      ...VALID_MOCK_PLAN,
+      guests: 220,
+    };
+
+    const mockGenerateContent = vi
+      .fn()
+      .mockResolvedValueOnce({
+        text: '{"reason": 123, invalid-patch', // invalid patch
+      })
+      .mockResolvedValueOnce({
+        text: JSON.stringify(updatedPlan), // valid full plan fallback
+      });
+
+    setCustomGenAIClient({
+      models: {
+        generateContent: mockGenerateContent,
+      },
+    });
+
+    const res = await request(app)
+      .post('/api/replan')
+      .send({
+        currentPlan: VALID_MOCK_PLAN,
+        changeInstruction: 'add 70 guests',
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.source).toBe('gemini');
+    expect(res.body.plan).toBeDefined();
+    expect(res.body.plan.guests).toBe(220);
+  });
+
+  it('POST /api/plan/stream streams all sections and completes with done', async () => {
+    // When no client is set, fallback streams core, timeline, vendors, ideas, risks, done
+    const res = await request(app)
+      .post('/api/plan/stream')
+      .send({ brief: "Sister's sangeet, 150 guests, ₹6L, 14 Dec, Vizag" });
+
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toContain('text/event-stream');
+
+    const raw = res.text;
+    expect(raw).toContain('"section":"core"');
+    expect(raw).toContain('"section":"timeline"');
+    expect(raw).toContain('"section":"vendors"');
+    expect(raw).toContain('"section":"ideas"');
+    expect(raw).toContain('"section":"risks"');
+    expect(raw).toContain('"section":"done"');
+  });
+
+  it('POST /api/plan/stream returns 400 for empty brief', async () => {
+    const res = await request(app)
+      .post('/api/plan/stream')
+      .send({ brief: '' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Invalid request payload');
+  });
+
+  it('POST /api/plan/stream with Gemini generates and streams section payloads', async () => {
+    const mockCore = {
+      title: 'Sister Sangeet Streamed',
+      event_type: 'sangeet',
+      event_date: '2026-12-14',
+      guests: 150,
+      total_budget: 600000,
+      city: 'Vizag',
+      theme: 'Retro Glam',
+      budget: [
+        { category: 'Venue', pct: 60, locked: false },
+        { category: 'Catering', pct: 40, locked: false },
+      ],
+      clarifying_question: null,
+    };
+    const mockTimeline = {
+      timeline: [{ t_minus_days: 60, title: 'Book Venue', owner: 'Family', done: false }],
+    };
+    const mockVendors = {
+      vendors: [
+        {
+          type: 'DJ',
+          est_low: 30000,
+          est_high: 50000,
+          questions: ['Has backup?'],
+          red_flags: ['No mixer'],
+          outreach_message: 'Hi DJ',
+        },
+      ],
+    };
+    const mockIdeas = {
+      ideas: [{ category: 'theme', title: 'Retro', description: 'Music vibe' }],
+    };
+    const mockRisks = {
+      risks: [{ risk: 'Rain', mitigation: 'Waterproof tent', severity: 'medium' }],
+    };
+
+    setCustomGenAIClient({
+      models: {
+        generateContent: vi
+          .fn()
+          .mockResolvedValueOnce({ text: JSON.stringify(mockCore) })
+          .mockResolvedValueOnce({ text: JSON.stringify(mockTimeline) })
+          .mockResolvedValueOnce({ text: JSON.stringify(mockVendors) })
+          .mockResolvedValueOnce({ text: JSON.stringify(mockIdeas) })
+          .mockResolvedValueOnce({ text: JSON.stringify(mockRisks) }),
+      },
+    });
+
+    const res = await request(app)
+      .post('/api/plan/stream')
+      .send({ brief: "Sister's sangeet, 150 guests, ₹6L, 14 Dec, Vizag" });
+
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toContain('text/event-stream');
+    expect(res.text).toContain('Sister Sangeet Streamed');
+    expect(res.text).toContain('Book Venue');
+    expect(res.text).toContain('"section":"done"');
+  });
 });
+

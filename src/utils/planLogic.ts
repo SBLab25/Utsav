@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { BudgetItem, EventPlan, PlanDiff, TimelineTask } from '../types/plan.ts';
+import type { BudgetItem, EventPlan, PlanDiff, TimelineTask, PlanPatch } from '../types/plan.ts';
 
 /**
  * Format Indian Rupee currency with standard Indian numbering system (lakhs & crores)
@@ -11,22 +11,24 @@ import { BudgetItem, EventPlan, PlanDiff, TimelineTask } from '../types/plan.ts'
 export function formatINR(amount: number, compact: boolean = false): string {
   if (isNaN(amount) || amount === null || amount === undefined) return '₹0';
   const clean = Math.round(amount);
+  const isNegative = clean < 0;
+  const absClean = Math.abs(clean);
 
   if (compact) {
-    if (Math.abs(clean) >= 10000000) {
-      return `₹${(clean / 10000000).toFixed(1).replace(/\.0$/, '')}Cr`;
+    const prefix = isNegative ? '-' : '';
+    if (absClean >= 10000000) {
+      return `${prefix}₹${(absClean / 10000000).toFixed(1).replace(/\.0$/, '')}Cr`;
     }
-    if (Math.abs(clean) >= 100000) {
-      return `₹${(clean / 100000).toFixed(1).replace(/\.0$/, '')}L`;
+    if (absClean >= 100000) {
+      return `${prefix}₹${(absClean / 100000).toFixed(1).replace(/\.0$/, '')}L`;
     }
-    if (Math.abs(clean) >= 1000) {
-      return `₹${(clean / 1000).toFixed(0)}k`;
+    if (absClean >= 1000) {
+      return `${prefix}₹${(absClean / 1000).toFixed(0)}k`;
     }
-    return `₹${clean}`;
+    return `${prefix}₹${absClean}`;
   }
 
   // Full Indian number format: 12,34,567
-  const isNegative = clean < 0;
   const absStr = Math.abs(clean).toString();
   let lastThree = absStr.substring(absStr.length - 3);
   const otherNumbers = absStr.substring(0, absStr.length - 3);
@@ -486,3 +488,299 @@ ${milestonesStr}
 
 _Generated with Utsav - AI Celebration & Event Planner_`;
 }
+
+/**
+ * Apply a PlanPatch to an EventPlan without mutating the original input.
+ * Preserves locked budget categories, re-normalises percentages to exactly 100%,
+ * and updates timeline tasks, vendors, and ideas.
+ */
+export function applyPatch(plan: EventPlan, patch: PlanPatch): EventPlan {
+  // Ensure the input is never mutated: create a deep clone
+  const updated: EventPlan = JSON.parse(JSON.stringify(plan));
+
+  // 1. Apply top-level scalar changes
+  if (patch.changes) {
+    if (patch.changes.event_date) updated.event_date = patch.changes.event_date;
+    if (typeof patch.changes.guests === 'number') updated.guests = patch.changes.guests;
+    if (typeof patch.changes.total_budget === 'number') updated.total_budget = patch.changes.total_budget;
+    if (patch.changes.city) updated.city = patch.changes.city;
+    if (patch.changes.theme) updated.theme = patch.changes.theme;
+  }
+
+  // 2. Budget changes & locked category preservation
+  const safeTotal = Math.max(1000, Math.round(updated.total_budget));
+  updated.total_budget = safeTotal;
+
+  // Track budget changes by lowercase category
+  const patchBudgetMap = new Map<string, number>();
+  if (Array.isArray(patch.budget_changes)) {
+    for (const b of patch.budget_changes) {
+      if (b && typeof b.category === 'string') {
+        patchBudgetMap.set(b.category.trim().toLowerCase(), b.new_pct);
+      }
+    }
+  }
+
+  // Prepare items with locked status preserved
+  // Locked items keep their exact rupee amount!
+  const budgetItems = updated.budget.map((item) => {
+    const isLocked = Boolean(item.locked);
+    const existingAmount =
+      typeof item.amount === 'number' && item.amount > 0
+        ? item.amount
+        : Math.round(((item.pct || 0) / 100) * plan.total_budget);
+
+    // If unlocked and has a patch percentage, update pct
+    const patchedPct = patchBudgetMap.get(item.category.trim().toLowerCase());
+    const pct = !isLocked && typeof patchedPct === 'number' ? patchedPct : item.pct;
+
+    return {
+      ...item,
+      locked: isLocked,
+      amount: existingAmount,
+      pct,
+    };
+  });
+
+  const lockedItems = budgetItems.filter((i) => i.locked);
+  const unlockedItems = budgetItems.filter((i) => !i.locked);
+  const lockedAmountSum = lockedItems.reduce((acc, i) => acc + (i.amount || 0), 0);
+
+  if (lockedItems.length > 0 && lockedAmountSum < safeTotal) {
+    const remainingBudget = safeTotal - lockedAmountSum;
+    const unlockedPctSum = unlockedItems.reduce((acc, i) => acc + (Number(i.pct) || 0), 0);
+    const safeUnlockedSum = unlockedPctSum > 0 ? unlockedPctSum : unlockedItems.length;
+
+    const adjustedItems = budgetItems.map((item) => {
+      if (item.locked) {
+        const pct = Math.round(((item.amount || 0) / safeTotal) * 1000) / 10;
+        return { ...item, pct };
+      } else {
+        const ratio = unlockedPctSum > 0 ? (Number(item.pct) || 0) / safeUnlockedSum : 1 / unlockedItems.length;
+        const amount = Math.round(ratio * remainingBudget);
+        const pct = Math.round((amount / safeTotal) * 1000) / 10;
+        return { ...item, amount, pct };
+      }
+    });
+    updated.budget = normalizeBudgetPercentages(adjustedItems, safeTotal);
+  } else if (lockedItems.length > 0 && lockedAmountSum >= safeTotal) {
+    // If locked items exceed or match total, scale proportionally
+    const scale = safeTotal / (lockedAmountSum || 1);
+    const scaledItems = budgetItems.map((item) => {
+      const scaledAmount = item.locked ? Math.round((item.amount || 0) * scale) : 0;
+      const pct = Math.round((scaledAmount / safeTotal) * 1000) / 10;
+      return { ...item, amount: scaledAmount, pct };
+    });
+    updated.budget = normalizeBudgetPercentages(scaledItems, safeTotal);
+  } else {
+    // No locked items: just apply normalized percentages
+    updated.budget = normalizeBudgetPercentages(budgetItems, safeTotal);
+  }
+
+  // 3. Timeline tasks
+  if (Array.isArray(patch.tasks_removed) && patch.tasks_removed.length > 0) {
+    const removeSet = new Set(patch.tasks_removed.map((t) => t.trim().toLowerCase()));
+    updated.timeline = updated.timeline.filter(
+      (t) => !removeSet.has(t.title.trim().toLowerCase())
+    );
+  }
+
+  if (Array.isArray(patch.tasks_modified) && patch.tasks_modified.length > 0) {
+    const modMap = new Map(
+      patch.tasks_modified.map((m) => [m.title.trim().toLowerCase(), m.new_t_minus_days])
+    );
+    updated.timeline = updated.timeline.map((t) => {
+      const newDays = modMap.get(t.title.trim().toLowerCase());
+      if (typeof newDays === 'number') {
+        return { ...t, t_minus_days: newDays };
+      }
+      return t;
+    });
+  }
+
+  if (Array.isArray(patch.tasks_added) && patch.tasks_added.length > 0) {
+    const existingTitles = new Set(updated.timeline.map((t) => t.title.trim().toLowerCase()));
+    for (const newTask of patch.tasks_added) {
+      if (newTask && newTask.title && !existingTitles.has(newTask.title.trim().toLowerCase())) {
+        updated.timeline.push(newTask);
+        existingTitles.add(newTask.title.trim().toLowerCase());
+      }
+    }
+  }
+
+  // Sort timeline in descending order of t_minus_days (e.g. 90, 60, 30, 7, 0)
+  updated.timeline.sort((a, b) => b.t_minus_days - a.t_minus_days);
+
+  // 4. Vendors
+  if (Array.isArray(patch.vendors_removed) && patch.vendors_removed.length > 0) {
+    const removeSet = new Set(patch.vendors_removed.map((v) => v.trim().toLowerCase()));
+    updated.vendors = updated.vendors.filter(
+      (v) => !removeSet.has(v.type.trim().toLowerCase())
+    );
+  }
+
+  if (Array.isArray(patch.vendors_added) && patch.vendors_added.length > 0) {
+    const existingTypes = new Set(updated.vendors.map((v) => v.type.trim().toLowerCase()));
+    for (const newVendor of patch.vendors_added) {
+      if (newVendor && newVendor.type && !existingTypes.has(newVendor.type.trim().toLowerCase())) {
+        updated.vendors.push(newVendor);
+        existingTypes.add(newVendor.type.trim().toLowerCase());
+      }
+    }
+  }
+
+  // 5. Ideas
+  if (Array.isArray(patch.ideas_added) && patch.ideas_added.length > 0) {
+    for (const newIdea of patch.ideas_added) {
+      if (newIdea && newIdea.title) {
+        updated.ideas.push(newIdea);
+      }
+    }
+  }
+
+  return updated;
+}
+
+/**
+ * Build exact diffs directly from a PlanPatch
+ */
+export function computeDiffsFromPatch(oldPlan: EventPlan, patch: PlanPatch): PlanDiff[] {
+  const diffs: PlanDiff[] = [];
+
+  // 1. Budget changes
+  if (patch.changes?.total_budget !== undefined && patch.changes.total_budget !== oldPlan.total_budget) {
+    const delta = patch.changes.total_budget - oldPlan.total_budget;
+    const formattedDelta = delta > 0 ? `+${formatINR(delta, true)}` : formatINR(delta, true);
+    diffs.push({
+      type: 'budget',
+      summary: `Total budget adjusted by ${formattedDelta} (${formatINR(oldPlan.total_budget, true)} → ${formatINR(patch.changes.total_budget, true)})`,
+      badge: formattedDelta,
+      changeType: 'modified',
+    });
+  }
+
+  // 2. Guests
+  if (patch.changes?.guests !== undefined && patch.changes.guests !== oldPlan.guests) {
+    const delta = patch.changes.guests - oldPlan.guests;
+    const sign = delta > 0 ? '+' : '';
+    diffs.push({
+      type: 'guests',
+      summary: `Guest list updated: ${oldPlan.guests} → ${patch.changes.guests} guests (${sign}${delta})`,
+      badge: `${sign}${delta} guests`,
+      changeType: 'modified',
+    });
+  }
+
+  // 3. Date
+  if (patch.changes?.event_date !== undefined && patch.changes.event_date !== oldPlan.event_date) {
+    diffs.push({
+      type: 'date',
+      summary: `Event date rescheduled from ${oldPlan.event_date} to ${patch.changes.event_date}`,
+      badge: 'Rescheduled',
+      changeType: 'modified',
+    });
+  }
+
+  // 4. City & Theme
+  if (patch.changes?.city && patch.changes.city.toLowerCase() !== oldPlan.city.toLowerCase()) {
+    diffs.push({
+      type: 'city',
+      summary: `Location moved from ${oldPlan.city} to ${patch.changes.city}`,
+      badge: patch.changes.city,
+      changeType: 'modified',
+    });
+  }
+
+  if (patch.changes?.theme && patch.changes.theme.toLowerCase() !== oldPlan.theme.toLowerCase()) {
+    diffs.push({
+      type: 'theme',
+      summary: `Theme refreshed: "${patch.changes.theme}"`,
+      badge: 'Theme update',
+      changeType: 'modified',
+    });
+  }
+
+  // 5. Category budget changes
+  if (Array.isArray(patch.budget_changes)) {
+    for (const bc of patch.budget_changes) {
+      diffs.push({
+        type: 'budget',
+        summary: `Adjusted ${bc.category} to ${bc.new_pct}%`,
+        badge: `${bc.new_pct}%`,
+        changeType: 'modified',
+      });
+    }
+  }
+
+  // 6. Tasks
+  if (Array.isArray(patch.tasks_added)) {
+    for (const t of patch.tasks_added) {
+      diffs.push({
+        type: 'timeline',
+        summary: `Added milestone: "${t.title}" at T-${t.t_minus_days}`,
+        badge: `+T-${t.t_minus_days}`,
+        changeType: 'added',
+      });
+    }
+  }
+
+  if (Array.isArray(patch.tasks_modified)) {
+    for (const m of patch.tasks_modified) {
+      diffs.push({
+        type: 'timeline',
+        summary: `Milestone "${m.title}" moved to T-${m.new_t_minus_days}`,
+        badge: `moved to T-${m.new_t_minus_days}`,
+        changeType: 'modified',
+      });
+    }
+  }
+
+  if (Array.isArray(patch.tasks_removed)) {
+    for (const title of patch.tasks_removed) {
+      diffs.push({
+        type: 'timeline',
+        summary: `Removed milestone: "${title}"`,
+        badge: '-Task',
+        changeType: 'removed',
+      });
+    }
+  }
+
+  // 7. Vendors
+  if (Array.isArray(patch.vendors_added)) {
+    for (const v of patch.vendors_added) {
+      diffs.push({
+        type: 'vendor',
+        summary: `New vendor added: ${v.type}`,
+        badge: `+${v.type}`,
+        changeType: 'added',
+      });
+    }
+  }
+
+  if (Array.isArray(patch.vendors_removed)) {
+    for (const v of patch.vendors_removed) {
+      diffs.push({
+        type: 'vendor',
+        summary: `Removed vendor: ${v}`,
+        badge: `-${v}`,
+        changeType: 'removed',
+      });
+    }
+  }
+
+  // 8. Ideas
+  if (Array.isArray(patch.ideas_added)) {
+    for (const i of patch.ideas_added) {
+      diffs.push({
+        type: 'idea',
+        summary: `Added inspiration: "${i.title}"`,
+        badge: '+Idea',
+        changeType: 'added',
+      });
+    }
+  }
+
+  return diffs;
+}
+

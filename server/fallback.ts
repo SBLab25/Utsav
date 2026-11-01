@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type { EventPlan, BudgetItem, TimelineTask, VendorRequirement, IdeaItem } from '../src/types/plan.ts';
+import type { EventPlan, BudgetItem, TimelineTask, VendorRequirement, IdeaItem, RiskItem } from '../src/types/plan.ts';
 
 /**
  * Parses budget amount from brief text looking for currency markers or explicit units (L, lakh, k, cr).
@@ -335,6 +335,9 @@ export function generateDefaultPlan(brief: string, referenceDate: Date = new Dat
     },
   ];
 
+  // 12. Generic Risks & Mitigations
+  const risks = generateDefaultRisks(eventType, city, total_budget, guests);
+
   return {
     title,
     event_type: eventType,
@@ -347,9 +350,171 @@ export function generateDefaultPlan(brief: string, referenceDate: Date = new Dat
     timeline,
     vendors,
     ideas,
+    risks,
     clarifying_question: null,
   };
 }
+
+/**
+ * Generates sensible default risks based on event parameters
+ */
+export function generateDefaultRisks(
+  eventType: string,
+  city: string,
+  totalBudget: number,
+  guests: number
+): RiskItem[] {
+  const isLarge = guests >= 250;
+  return [
+    {
+      risk: `Unpredictable weather or seasonal rain impacting outdoor areas in ${city}`,
+      mitigation: `Secure venue with integrated indoor hall or pre-book waterproof canopy hangars 48 hours prior.`,
+      severity: 'medium',
+    },
+    {
+      risk: `Local sound curfew enforcement after 10:00 PM for DJ & high-decibel music in ${city}`,
+      mitigation: `Obtain local police and municipal entertainment permissions in advance, and plan after-party playlist indoors.`,
+      severity: eventType === 'sangeet' || eventType === 'birthday' ? 'high' : 'medium',
+    },
+    {
+      risk: `Guest count exceeding estimated ${guests} attendees leading to catering and bar bottlenecks`,
+      mitigation: `Contract a 10-15% buffer plate margin with caterer and operate twin live counter stations.`,
+      severity: isLarge ? 'high' : 'medium',
+    },
+    {
+      risk: `High electrical load from stage lighting, air-conditioning, and audio rigs tripping venue breakers`,
+      mitigation: `Require venue or production vendor to provide a dedicated 62.5+ kVA silent generator backup with auto-switchover.`,
+      severity: 'medium',
+    },
+    {
+      risk: `Traffic congestion and tight parking access for arriving guests in ${city}`,
+      mitigation: `Contract dedicated valet staff and share GPS parking instructions directly in the digital invite.`,
+      severity: 'low',
+    },
+  ];
+}
+
+export function generateDefaultTimeline(core: {
+  city?: string;
+  guests?: number;
+  theme?: string;
+}): TimelineTask[] {
+  const city = core.city || 'City';
+  const guests = core.guests || 100;
+  const theme = core.theme || 'Celebration';
+  return [
+    { t_minus_days: 90, title: `Confirm Venue & Dates in ${city}`, owner: 'Lead Organizer', done: false },
+    { t_minus_days: 60, title: `Finalize Catering Menu & Tastings (${guests} guests)`, owner: 'Food Committee', done: false },
+    { t_minus_days: 30, title: `Book Audio-Visual & Entertainment Setup`, owner: 'Entertainment Lead', done: false },
+    { t_minus_days: 15, title: `Review ${theme} Theme Decor & Lighting Layout`, owner: 'Decor Team', done: false },
+    { t_minus_days: 7, title: `Conduct Final Vendor Walkthrough & Rehearsals`, owner: 'Core Team', done: false },
+    { t_minus_days: 0, title: `Event Day Coordination & Hospitality Welcome`, owner: 'Event Leads', done: false },
+  ];
+}
+
+export function generateDefaultVendors(core: {
+  eventType?: string;
+  city?: string;
+  totalBudget?: number;
+  guests?: number;
+  theme?: string;
+  eventDate?: string;
+}): VendorRequirement[] {
+  const city = core.city || 'City';
+  const total_budget = core.totalBudget || 500000;
+  const guests = core.guests || 100;
+  const eventType = core.eventType || 'celebration';
+  const theme = core.theme || 'Celebration';
+  const event_date = core.eventDate || 'upcoming date';
+
+  return [
+    {
+      type: 'Venue & Decor Setup',
+      est_low: Math.round(total_budget * 0.3),
+      est_high: Math.round(total_budget * 0.4),
+      questions: [
+        'Does the package include basic lighting, carpeting, and power backup?',
+        'What are the setup access hours and teardown curfew timings?',
+      ],
+      red_flags: [
+        'Hidden electricity / generator diesel surcharges',
+        'No dedicated venue coordinator on-site during the event',
+      ],
+      outreach_message: `Hello! We are organizing a ${guests}-guest ${eventType} in ${city} on ${event_date} with a ${theme} theme. Please share your availability and decor packages.`,
+    },
+    {
+      type: 'Catering & Beverages',
+      est_low: Math.round(total_budget * 0.25),
+      est_high: Math.round(total_budget * 0.35),
+      questions: [
+        'What live counters and dessert stations are included in the per-plate price?',
+        'What is your buffer policy for unexpected extra guests?',
+      ],
+      red_flags: [
+        'No tasting session prior to contract signing',
+        'Unclear staff-to-guest serving ratio',
+      ],
+      outreach_message: `Hi! We require catering services for ${guests} guests on ${event_date} in ${city}. Please share your sample menus and per-plate pricing options.`,
+    },
+    {
+      type: 'Sound, DJ & AV Production',
+      est_low: Math.round(total_budget * 0.1),
+      est_high: Math.round(total_budget * 0.18),
+      questions: [
+        'Do you provide wireless microphones, console mixers, and stage monitors?',
+        'Can you accommodate custom playlists and live announcements?',
+      ],
+      red_flags: [
+        'No backup audio mixer or spare cables',
+        'Inadequate speaker wattage for the venue scale',
+      ],
+      outreach_message: `Greetings! We are seeking an experienced audio-visual and sound partner for our celebration on ${event_date} in ${city} (${guests} attendees). Kindly provide equipment details and quotes.`,
+    },
+  ];
+}
+
+export function generateDefaultIdeas(core: {
+  title?: string;
+  theme?: string;
+  city?: string;
+  guests?: number;
+  eventDate?: string;
+}): IdeaItem[] {
+  const title = core.title || 'Celebration Plan';
+  const theme = core.theme || 'Celebration';
+  const city = core.city || 'City';
+  const guests = core.guests || 100;
+  const event_date = core.eventDate || 'upcoming date';
+
+  return [
+    {
+      category: 'theme',
+      title: `${theme} Concept`,
+      description: `Cohesive aesthetic featuring warm color palettes, personalized accents, and curated mood lighting suited for ${city}.`,
+    },
+    {
+      category: 'menu',
+      title: 'Curated Feast & Live Stations',
+      description: `Balance of regional delicacies, fresh interactive street-food counters, and signature desserts tailored for ${guests} guests.`,
+    },
+    {
+      category: 'decor',
+      title: 'Photo-Op Welcome Arch',
+      description: `A branded floral or illuminated backdrop at the reception entryway for keepsake guest photography.`,
+    },
+    {
+      category: 'invitation',
+      title: 'Digital Invitation Copy',
+      description: `Warm Greetings,\nPlease join us to celebrate ${title} on ${event_date} in ${city}.\nYour presence and blessings will make our celebration complete!`,
+    },
+    {
+      category: 'rsvp',
+      title: 'WhatsApp RSVP Template',
+      description: `✨ *Invitation to ${title}*\nDate: ${event_date} | Location: ${city}\nPlease let us know if you and your family will be joining us. We look forward to celebrating together!`,
+    },
+  ];
+}
+
 
 /**
  * Smart heuristic re-planner:
@@ -488,6 +653,11 @@ export function applySmartReplan(
   if (updated.ideas.length > 20) updated.ideas = updated.ideas.slice(0, 20);
   if (updated.timeline.length > 30) updated.timeline = updated.timeline.slice(0, 30);
   if (updated.budget.length > 12) updated.budget = updated.budget.slice(0, 12);
+  if (!updated.risks || !Array.isArray(updated.risks)) {
+    updated.risks = generateDefaultRisks(updated.event_type, updated.city, updated.total_budget, updated.guests);
+  } else if (updated.risks.length > 20) {
+    updated.risks = updated.risks.slice(0, 20);
+  }
 
   return updated;
 }

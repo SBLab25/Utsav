@@ -226,6 +226,7 @@ describe('Accessibility (WCAG 2.1 AA) via vitest-axe', () => {
   it('renders DiffViewer with no axe violations', async () => {
     const { container } = render(
       <DiffViewer
+        reason="Budget adjusted by +₹50,000 to accommodate live chaat counters"
         diffs={[
           {
             type: 'budget',

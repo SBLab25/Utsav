@@ -14,8 +14,10 @@ import {
   adjustCategoryPercentage,
   addBudgetCategory,
   removeBudgetCategory,
+  applyPatch,
+  computeDiffsFromPatch,
 } from './planLogic.ts';
-import type { BudgetItem, EventPlan } from '../types/plan.ts';
+import type { BudgetItem, EventPlan, PlanPatch } from '../types/plan.ts';
 
 describe('planLogic', () => {
   it('formatINR formats compact and full Indian rupee numbers correctly', () => {
@@ -201,5 +203,142 @@ describe('planLogic', () => {
 
     const totalPct = Math.round(updated.reduce((sum, i) => sum + i.pct, 0) * 10) / 10;
     expect(totalPct).toBe(100);
+  });
+
+  it('applyPatch keeps locked budget categories, re-normalises percentages to 100, and never mutates input', () => {
+    const initialPlan: EventPlan = {
+      title: "Sister's Sangeet",
+      event_type: 'sangeet',
+      event_date: '2026-12-14',
+      guests: 150,
+      total_budget: 600000,
+      city: 'Vizag',
+      theme: 'Retro Bollywood',
+      budget: [
+        { category: 'Venue', pct: 50, locked: true, amount: 300000 },
+        { category: 'Catering', pct: 30, locked: false, amount: 180000 },
+        { category: 'DJ', pct: 20, locked: false, amount: 120000 },
+      ],
+      timeline: [
+        { t_minus_days: 60, title: 'Book Venue', owner: 'Family', done: false },
+        { t_minus_days: 30, title: 'Hire DJ', owner: 'Brother', done: false },
+      ],
+      vendors: [
+        { type: 'DJ', est_low: 35000, est_high: 60000, questions: [], red_flags: [], outreach_message: 'Hi' },
+      ],
+      ideas: [
+        { category: 'theme', title: 'Disco', description: 'Retro 80s' },
+      ],
+      clarifying_question: null,
+    };
+
+    // Deep freeze input snapshot to guarantee no mutation
+    const initialPlanSnapshot = JSON.stringify(initialPlan);
+
+    const patch: PlanPatch = {
+      reason: 'Increase budget to ₹8L, add 50 guests, modify DJ timeline, and add photo booth',
+      changes: {
+        total_budget: 800000,
+        guests: 200,
+      },
+      budget_changes: [
+        { category: 'Catering', new_pct: 40 },
+      ],
+      tasks_added: [
+        { t_minus_days: 15, title: 'Photo Booth Props', owner: 'Cousins', done: false },
+      ],
+      tasks_removed: [],
+      tasks_modified: [
+        { title: 'Hire DJ', new_t_minus_days: 45 },
+      ],
+      vendors_added: [
+        { type: 'Photographer', est_low: 50000, est_high: 90000, questions: [], red_flags: [], outreach_message: 'Hi' },
+      ],
+      vendors_removed: [],
+      ideas_added: [
+        { category: 'decor', title: 'Vinyl Wall', description: 'Vinyl records' },
+      ],
+    };
+
+    const patched = applyPatch(initialPlan, patch);
+
+    // 1. Verify input was not mutated
+    expect(JSON.stringify(initialPlan)).toBe(initialPlanSnapshot);
+
+    // 2. Verify scalar changes
+    expect(patched.total_budget).toBe(800000);
+    expect(patched.guests).toBe(200);
+
+    // 3. Verify locked budget item retained its rupee amount
+    const venue = patched.budget.find((b) => b.category === 'Venue');
+    expect(venue).toBeDefined();
+    expect(venue?.locked).toBe(true);
+    expect(venue?.amount).toBe(300000);
+
+    // 4. Verify sum of percentages is exactly 100
+    const sumPct = Math.round(patched.budget.reduce((sum, b) => sum + b.pct, 0) * 10) / 10;
+    expect(sumPct).toBe(100);
+
+    // 5. Verify task changes
+    const djTask = patched.timeline.find((t) => t.title === 'Hire DJ');
+    expect(djTask?.t_minus_days).toBe(45);
+
+    const photoTask = patched.timeline.find((t) => t.title === 'Photo Booth Props');
+    expect(photoTask).toBeDefined();
+    expect(photoTask?.t_minus_days).toBe(15);
+
+    // 6. Verify vendor and idea added
+    expect(patched.vendors.some((v) => v.type === 'Photographer')).toBe(true);
+    expect(patched.ideas.some((i) => i.title === 'Vinyl Wall')).toBe(true);
+  });
+
+  it('computeDiffsFromPatch produces exact diffs for all patch operations', () => {
+    const oldPlan: EventPlan = {
+      title: "Sister's Sangeet",
+      event_type: 'sangeet',
+      event_date: '2026-12-14',
+      guests: 150,
+      total_budget: 600000,
+      city: 'Vizag',
+      theme: 'Retro Bollywood',
+      budget: [],
+      timeline: [],
+      vendors: [],
+      ideas: [],
+    };
+
+    const patch: PlanPatch = {
+      reason: 'Reduced budget by ₹50k and moved to Jan 10',
+      changes: {
+        total_budget: 550000,
+        event_date: '2027-01-10',
+        guests: 180,
+      },
+      budget_changes: [{ category: 'Decor', new_pct: 25 }],
+      tasks_added: [{ t_minus_days: 20, title: 'Sound check', owner: 'Tech', done: false }],
+      tasks_removed: ['Old task'],
+      tasks_modified: [{ title: 'Cake order', new_t_minus_days: 10 }],
+      vendors_added: [{ type: 'Live Band', est_low: 40000, est_high: 70000, questions: [], red_flags: [], outreach_message: '' }],
+      vendors_removed: ['Clown'],
+      ideas_added: [{ category: 'menu', title: 'Live Chaat', description: 'Sev puri' }],
+    };
+
+    const diffs = computeDiffsFromPatch(oldPlan, patch);
+    expect(diffs.length).toBe(10);
+
+    const budgetDiff = diffs.find((d) => d.type === 'budget');
+    expect(budgetDiff?.badge).toBe('-₹50k');
+
+    const guestDiff = diffs.find((d) => d.type === 'guests');
+    expect(guestDiff?.badge).toBe('+30 guests');
+
+    const dateDiff = diffs.find((d) => d.type === 'date');
+    expect(dateDiff?.badge).toBe('Rescheduled');
+
+    const modTask = diffs.find((d) => d.badge === 'moved to T-10');
+    expect(modTask).toBeDefined();
+
+    const remVendor = diffs.find((d) => d.badge === '-Clown');
+    expect(remVendor).toBeDefined();
   });
 });

@@ -87,4 +87,19 @@ describe('server/fallback', () => {
     expect(replanned.total_budget).toBe(600000);
     expect(replanned.guests).toBe(150);
   });
+
+  it('generateDefaultPlan includes realistic risk assessments and mitigations', () => {
+    const brief = "Sister's sangeet, 150 guests, ₹6L, 14 Dec, Vizag";
+    const plan = generateDefaultPlan(brief, new Date('2026-10-01'));
+
+    expect(plan.risks).toBeDefined();
+    expect(Array.isArray(plan.risks)).toBe(true);
+    expect(plan.risks!.length).toBeGreaterThanOrEqual(3);
+
+    const firstRisk = plan.risks![0];
+    expect(firstRisk.risk).toBeDefined();
+    expect(firstRisk.mitigation).toBeDefined();
+    expect(['low', 'medium', 'high']).toContain(firstRisk.severity);
+  });
 });
+

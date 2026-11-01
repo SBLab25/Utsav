@@ -4,18 +4,49 @@
  */
 
 import { Router } from 'express';
-import { generateDefaultPlan, applySmartReplan } from '../fallback.ts';
+import {
+  generateDefaultPlan,
+  applySmartReplan,
+  generateDefaultRisks,
+  generateDefaultTimeline,
+  generateDefaultVendors,
+  generateDefaultIdeas,
+} from '../fallback.ts';
 import {
   planRequestSchema,
   replanRequestSchema,
+  eventPlanSchema,
+  corePlanSchema,
+  timelineSectionSchema,
+  vendorsSectionSchema,
+  ideasSectionSchema,
+  risksSectionSchema,
 } from '../../src/schemas/plan.ts';
 import { sanitizeUserText } from '../../src/utils/security.ts';
 import {
   getGenAIClient,
   callGeminiAndValidate,
+  callGeminiPatchAndValidate,
+  callGeminiSectionAndValidate,
   GEMINI_MODEL,
 } from '../gemini.ts';
-import { getIntakePrompt, getReplanPrompt } from '../prompts.ts';
+import {
+  getIntakePrompt,
+  getReplanPrompt,
+  getPlanPatchPrompt,
+  createConcisePlanForReplan,
+  getCorePrompt,
+  getTimelinePrompt,
+  getVendorsPrompt,
+  getIdeasPrompt,
+  getRisksPrompt,
+  geminiCoreResponseSchema,
+  geminiTimelineResponseSchema,
+  geminiVendorsResponseSchema,
+  geminiIdeasResponseSchema,
+  geminiRisksResponseSchema,
+} from '../prompts.ts';
+import { applyPatch } from '../../src/utils/planLogic.ts';
 
 export const router = Router();
 
@@ -27,6 +58,265 @@ router.get('/health', (_req, res) => {
     service: 'utsav-event-planner',
   });
 });
+
+// Progressive plan generation via Server-Sent Events (SSE)
+router.post('/plan/stream', async (req, res) => {
+  let aborted = false;
+  res.on('close', () => {
+    if (!res.writableEnded) {
+      aborted = true;
+    }
+  });
+
+  const bodyValidation = planRequestSchema.safeParse(req.body);
+  if (!bodyValidation.success) {
+    return res.status(400).json({ error: 'Invalid request payload' });
+  }
+
+  // Set SSE headers
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+
+  const sendSSE = (obj: any) => {
+    if (!res.writableEnded && !aborted) {
+      res.write(`data: ${JSON.stringify(obj)}\n\n`);
+    }
+  };
+
+  const { brief } = bodyValidation.data;
+  const timeoutMs = parseInt(process.env.GEMINI_TIMEOUT_MS || '25000', 10);
+  const ai = getGenAIClient();
+
+  if (!ai) {
+    // Fallback path when no API key
+    const defaultPlan = generateDefaultPlan(brief);
+    if (!aborted) {
+      sendSSE({
+        section: 'core',
+        data: {
+          title: defaultPlan.title,
+          event_type: defaultPlan.event_type,
+          event_date: defaultPlan.event_date,
+          guests: defaultPlan.guests,
+          total_budget: defaultPlan.total_budget,
+          city: defaultPlan.city,
+          theme: defaultPlan.theme,
+          budget: defaultPlan.budget,
+          clarifying_question: defaultPlan.clarifying_question,
+        },
+        fallback: true,
+      });
+      sendSSE({ section: 'timeline', data: defaultPlan.timeline, fallback: true });
+      sendSSE({ section: 'vendors', data: defaultPlan.vendors, fallback: true });
+      sendSSE({ section: 'ideas', data: defaultPlan.ideas, fallback: true });
+      sendSSE({ section: 'risks', data: defaultPlan.risks, fallback: true });
+      sendSSE({ section: 'done' });
+      res.end();
+    }
+    return;
+  }
+
+  try {
+    const sanitizedBrief = sanitizeUserText(brief);
+
+    // 1. Generate Core (title, type, date, guests, budget, city, theme, budget categories)
+    const corePrompt = getCorePrompt(sanitizedBrief);
+    const coreResult = await callGeminiSectionAndValidate(
+      ai,
+      corePrompt,
+      geminiCoreResponseSchema,
+      corePlanSchema,
+      timeoutMs
+    );
+
+    if (aborted) return;
+
+    let coreData: any;
+    let isCoreFallback = false;
+    if (coreResult.success) {
+      coreData = coreResult.data;
+    } else {
+      isCoreFallback = true;
+      const defaultPlan = generateDefaultPlan(brief);
+      coreData = {
+        title: defaultPlan.title,
+        event_type: defaultPlan.event_type,
+        event_date: defaultPlan.event_date,
+        guests: defaultPlan.guests,
+        total_budget: defaultPlan.total_budget,
+        city: defaultPlan.city,
+        theme: defaultPlan.theme,
+        budget: defaultPlan.budget,
+        clarifying_question: defaultPlan.clarifying_question,
+      };
+    }
+
+    sendSSE({ section: 'core', data: coreData, fallback: isCoreFallback });
+
+    if (aborted) return;
+
+    // 2. Generate Timeline
+    const timelinePrompt = getTimelinePrompt(coreData);
+    const timelineResult = await callGeminiSectionAndValidate(
+      ai,
+      timelinePrompt,
+      geminiTimelineResponseSchema,
+      timelineSectionSchema,
+      timeoutMs
+    );
+
+    if (aborted) return;
+
+    let timelineData: any;
+    let isTimelineFallback = false;
+    if (timelineResult.success) {
+      timelineData = timelineResult.data.timeline;
+    } else {
+      isTimelineFallback = true;
+      timelineData = generateDefaultTimeline({
+        city: coreData.city,
+        guests: coreData.guests,
+        theme: coreData.theme,
+      });
+    }
+
+    sendSSE({ section: 'timeline', data: timelineData, fallback: isTimelineFallback });
+
+    if (aborted) return;
+
+    // 3, 4, 5. Run Vendors, Ideas, and Risks in parallel once core is ready
+    const runVendors = async () => {
+      if (aborted) return;
+      try {
+        const vendorsPrompt = getVendorsPrompt(coreData);
+        const vendorsResult = await callGeminiSectionAndValidate(
+          ai,
+          vendorsPrompt,
+          geminiVendorsResponseSchema,
+          vendorsSectionSchema,
+          timeoutMs
+        );
+        if (aborted) return;
+        if (vendorsResult.success) {
+          sendSSE({ section: 'vendors', data: vendorsResult.data.vendors, fallback: false });
+        } else {
+          const fallbackVendors = generateDefaultVendors({
+            eventType: coreData.event_type,
+            city: coreData.city,
+            totalBudget: coreData.total_budget,
+            guests: coreData.guests,
+            theme: coreData.theme,
+            eventDate: coreData.event_date,
+          });
+          sendSSE({ section: 'vendors', data: fallbackVendors, fallback: true });
+        }
+      } catch (_err) {
+        if (!aborted) {
+          const fallbackVendors = generateDefaultVendors({
+            eventType: coreData.event_type,
+            city: coreData.city,
+            totalBudget: coreData.total_budget,
+            guests: coreData.guests,
+            theme: coreData.theme,
+            eventDate: coreData.event_date,
+          });
+          sendSSE({ section: 'vendors', data: fallbackVendors, fallback: true });
+        }
+      }
+    };
+
+    const runIdeas = async () => {
+      if (aborted) return;
+      try {
+        const ideasPrompt = getIdeasPrompt(coreData);
+        const ideasResult = await callGeminiSectionAndValidate(
+          ai,
+          ideasPrompt,
+          geminiIdeasResponseSchema,
+          ideasSectionSchema,
+          timeoutMs
+        );
+        if (aborted) return;
+        if (ideasResult.success) {
+          sendSSE({ section: 'ideas', data: ideasResult.data.ideas, fallback: false });
+        } else {
+          const fallbackIdeas = generateDefaultIdeas({
+            title: coreData.title,
+            theme: coreData.theme,
+            city: coreData.city,
+            guests: coreData.guests,
+            eventDate: coreData.event_date,
+          });
+          sendSSE({ section: 'ideas', data: fallbackIdeas, fallback: true });
+        }
+      } catch (_err) {
+        if (!aborted) {
+          const fallbackIdeas = generateDefaultIdeas({
+            title: coreData.title,
+            theme: coreData.theme,
+            city: coreData.city,
+            guests: coreData.guests,
+            eventDate: coreData.event_date,
+          });
+          sendSSE({ section: 'ideas', data: fallbackIdeas, fallback: true });
+        }
+      }
+    };
+
+    const runRisks = async () => {
+      if (aborted) return;
+      try {
+        const risksPrompt = getRisksPrompt(coreData);
+        const risksResult = await callGeminiSectionAndValidate(
+          ai,
+          risksPrompt,
+          geminiRisksResponseSchema,
+          risksSectionSchema,
+          timeoutMs
+        );
+        if (aborted) return;
+        if (risksResult.success) {
+          sendSSE({ section: 'risks', data: risksResult.data.risks, fallback: false });
+        } else {
+          const fallbackRisks = generateDefaultRisks(
+            coreData.event_type,
+            coreData.city,
+            coreData.total_budget,
+            coreData.guests
+          );
+          sendSSE({ section: 'risks', data: fallbackRisks, fallback: true });
+        }
+      } catch (_err) {
+        if (!aborted) {
+          const fallbackRisks = generateDefaultRisks(
+            coreData.event_type,
+            coreData.city,
+            coreData.total_budget,
+            coreData.guests
+          );
+          sendSSE({ section: 'risks', data: fallbackRisks, fallback: true });
+        }
+      }
+    };
+
+    await Promise.all([runVendors(), runIdeas(), runRisks()]);
+
+    if (!aborted) {
+      sendSSE({ section: 'done' });
+      res.end();
+    }
+  } catch (err: any) {
+    if (!aborted && !res.writableEnded) {
+      sendSSE({ section: 'error', error: err?.message || 'Streaming plan generation failed' });
+      res.end();
+    }
+  }
+});
+
 
 // API endpoint: Generate or intake plan
 router.post('/plan', async (req, res) => {
@@ -73,7 +363,7 @@ router.post('/plan', async (req, res) => {
   }
 });
 
-// Re-plan endpoint
+// Re-plan endpoint: Optimized PlanPatch flow with full-plan fallback
 router.post('/replan', async (req, res) => {
   try {
     const bodyValidation = replanRequestSchema.safeParse(req.body);
@@ -91,27 +381,59 @@ router.post('/replan', async (req, res) => {
     }
 
     const sanitizedInstruction = sanitizeUserText(changeInstruction);
-    const prompt = getReplanPrompt(JSON.stringify(currentPlan), sanitizedInstruction);
-
     const timeoutMs = parseInt(process.env.GEMINI_TIMEOUT_MS || '25000', 10);
     const activeModel = process.env.GEMINI_MODEL || GEMINI_MODEL;
-    let result = await callGeminiAndValidate(ai, prompt, timeoutMs);
 
-    if (!result.success && result.reason === 'timeout') {
+    // Reduce payload size by sending only the fields Gemini needs
+    const concisePlan = createConcisePlanForReplan(currentPlan);
+    const concisePlanJson = JSON.stringify(concisePlan);
+
+    // 1. Primary path: Ask Gemini for ONLY a PlanPatch
+    const patchPrompt = getPlanPatchPrompt(concisePlanJson, sanitizedInstruction);
+    const patchResult = await callGeminiPatchAndValidate(ai, patchPrompt, timeoutMs);
+
+    if (patchResult.success) {
+      try {
+        const patchedPlan = applyPatch(currentPlan, patchResult.patch);
+        const planCheck = eventPlanSchema.safeParse(patchedPlan);
+        if (planCheck.success) {
+          return res.json({
+            plan: planCheck.data,
+            patch: patchResult.patch,
+            model: activeModel,
+            source: 'gemini',
+          });
+        }
+      } catch (_patchErr) {
+        // If applying patch threw an error, continue to full-plan fallback
+      }
+    }
+
+    if (!patchResult.success && patchResult.reason === 'timeout') {
       const updatedPlan = applySmartReplan(currentPlan, changeInstruction);
       return res.json({ plan: updatedPlan, model: 'smart-replan-instant', source: 'fallback-timeout' });
     }
 
-    if (!result.success) {
-      result = await callGeminiAndValidate(ai, prompt, timeoutMs);
+    // 2. Secondary path: Fallback to full-plan generation if patch was invalid or failed
+    const fullPlanPrompt = getReplanPrompt(concisePlanJson, sanitizedInstruction);
+    let fullResult = await callGeminiAndValidate(ai, fullPlanPrompt, timeoutMs);
+
+    if (!fullResult.success && fullResult.reason === 'timeout') {
+      const updatedPlan = applySmartReplan(currentPlan, changeInstruction);
+      return res.json({ plan: updatedPlan, model: 'smart-replan-instant', source: 'fallback-timeout' });
     }
 
-    if (result.success) {
-      return res.json({ plan: result.plan, model: activeModel, source: 'gemini' });
+    if (!fullResult.success) {
+      fullResult = await callGeminiAndValidate(ai, fullPlanPrompt, timeoutMs);
     }
 
+    if (fullResult.success) {
+      return res.json({ plan: fullResult.plan, model: activeModel, source: 'gemini' });
+    }
+
+    // 3. Final fallback: Deterministic smart replan
     const fallback = applySmartReplan(currentPlan, changeInstruction);
-    const source = result.reason === 'timeout' ? 'fallback-timeout' : 'fallback-error';
+    const source = fullResult.reason === 'timeout' ? 'fallback-timeout' : 'fallback-error';
     return res.json({ plan: fallback, model: 'smart-fallback', source });
   } catch (_error) {
     const fallbackPlan = (req.body?.currentPlan && typeof req.body.currentPlan === 'object')

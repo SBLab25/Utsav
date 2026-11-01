@@ -9,17 +9,18 @@ import { Sparkles, X, ArrowUpRight, CheckCircle2 } from 'lucide-react';
 
 interface DiffViewerProps {
   diffs: PlanDiff[];
+  reason?: string | null;
   onDismiss: () => void;
 }
 
-export const DiffViewer: React.FC<DiffViewerProps> = ({ diffs, onDismiss }) => {
+export const DiffViewer: React.FC<DiffViewerProps> = ({ diffs, reason, onDismiss }) => {
   if (!diffs || diffs.length === 0) return null;
 
   return (
-    <div className="bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-purple-500/10 dark:from-amber-500/20 dark:to-purple-500/20 border border-[#F5A623]/40 rounded-2xl p-4 shadow-sm space-y-3 animate-in fade-in slide-in-from-top-2 duration-300">
+    <div className="bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-purple-500/10 dark:from-amber-500/20 dark:to-purple-500/20 border border-[#B45309]/30 dark:border-[#F5A623]/40 rounded-2xl p-4 shadow-sm space-y-3 animate-in fade-in slide-in-from-top-2 duration-300">
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <span className="p-1.5 rounded-lg bg-[#F5A623] text-stone-950 font-bold">
+          <span className="p-1.5 rounded-lg bg-[#B45309] text-white dark:bg-[#F5A623] dark:text-stone-950 font-bold">
             <Sparkles className="w-3.5 h-3.5" />
           </span>
           <div>
@@ -40,6 +41,14 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({ diffs, onDismiss }) => {
           <X className="w-4 h-4" />
         </button>
       </div>
+
+      {/* Patch Reason One-Line Summary */}
+      {reason && (
+        <div className="px-3 py-2 rounded-xl bg-white/80 dark:bg-stone-900/80 border border-stone-200/80 dark:border-stone-800 text-xs font-medium text-stone-800 dark:text-stone-200 flex items-center gap-2 shadow-xs">
+          <span className="font-bold text-[#B45309] dark:text-[#F5A623] shrink-0">Summary:</span>
+          <span className="truncate">{reason}</span>
+        </div>
+      )}
 
       {/* Diff Chips List */}
       <div className="flex flex-wrap gap-2">

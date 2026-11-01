@@ -8,11 +8,13 @@ export type {
   TimelineTask,
   VendorRequirement,
   IdeaItem,
+  RiskItem,
   EventPlan,
+  PlanPatch,
 } from '../schemas/plan.ts';
 
 export interface PlanDiff {
-  type: 'budget' | 'date' | 'guests' | 'city' | 'theme' | 'timeline' | 'vendor' | 'idea';
+  type: 'budget' | 'date' | 'guests' | 'city' | 'theme' | 'timeline' | 'vendor' | 'idea' | 'risk';
   summary: string;
   badge?: string;
   changeType: 'added' | 'removed' | 'modified';

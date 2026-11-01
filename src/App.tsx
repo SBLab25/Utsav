@@ -11,6 +11,7 @@ import {
   Clock,
   Briefcase,
   Lightbulb,
+  ShieldAlert,
   AlertCircle,
   HelpCircle,
 } from 'lucide-react';
@@ -22,12 +23,14 @@ import type {
   PlanHistoryItem,
   VendorRequirement,
   IdeaItem,
+  RiskItem,
 } from './types/plan.ts';
 import { eventPlanSchema } from './schemas/plan.ts';
 import {
   formatINR,
   normalizeBudgetPercentages,
   computePlanDiff,
+  computeDiffsFromPatch,
 } from './utils/planLogic.ts';
 import { Header } from './components/Header.tsx';
 import { BriefInput } from './components/BriefInput.tsx';
@@ -37,6 +40,7 @@ import { BudgetTab } from './components/BudgetTab.tsx';
 import { TimelineTab } from './components/TimelineTab.tsx';
 import { VendorsTab } from './components/VendorsTab.tsx';
 import { IdeasTab } from './components/IdeasTab.tsx';
+import { RisksTab } from './components/RisksTab.tsx';
 import { HistoryDrawer } from './components/HistoryDrawer.tsx';
 import { SkeletonLoader } from './components/SkeletonLoader.tsx';
 import { StatusBanner } from './components/StatusBanner.tsx';
@@ -101,8 +105,27 @@ const INITIAL_SANGEET_PLAN: EventPlan = {
     { category: "invitation", title: "Filmi Premiere Card", description: "🎬 BLOCKBUSTER SANGEET PREMIERE\nStarring: The Bride & Her Squad!\nJoin us on 14th Dec 2026, 7:00 PM onwards at Sea Breeze Lawns, Vizag.\nDress Code: Retro Bollywood Glamour.\nPrepare your dancing shoes!" },
     { category: "rsvp", title: "WhatsApp RSVP Template", description: "💃 *Sangeet Alert!* Can't wait to dance with you at Sister's Retro Sangeet on 14 Dec in Vizag. Please RSVP by Dec 1 with your favorite dance track for the DJ! 🎵" },
   ],
+  risks: [
+    {
+      risk: "Sudden coastal rain or excessive humidity in Vizag affecting outdoor open-lawn sound & decor",
+      mitigation: "Pre-book waterproof transparent canopy covering the dance floor and ensure indoor banquet backup with hotel.",
+      severity: "medium",
+    },
+    {
+      risk: "City police sound curfew strictly enforced after 10:00 PM for high-decibel DJ rig",
+      mitigation: "Plan high-energy choreography face-offs between 7:30-10:00 PM, then shift to indoor acoustic after-party.",
+      severity: "high",
+    },
+    {
+      risk: "High generator load from moving lights, stage LED wall, and sound amplifiers tripping local power",
+      mitigation: "Contract a dedicated 62.5 kVA silent diesel generator with automatic changeover switch exclusively for the AV rig.",
+      severity: "medium",
+    },
+  ],
   clarifying_question: null,
 };
+
+type TabType = 'budget' | 'timeline' | 'vendors' | 'ideas' | 'risks';
 
 export default function App() {
   const [plan, setPlan] = useState<EventPlan>(() => {
@@ -127,11 +150,27 @@ export default function App() {
     }
     return INITIAL_SANGEET_PLAN;
   });
-  const [activeTab, setActiveTab] = useState<'budget' | 'timeline' | 'vendors' | 'ideas'>('budget');
+  const [activeTab, setActiveTab] = useState<TabType>('budget');
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [isStreaming, setIsStreaming] = useState<boolean>(false);
+  const [loadedSections, setLoadedSections] = useState<{
+    core: boolean;
+    timeline: boolean;
+    vendors: boolean;
+    ideas: boolean;
+    risks: boolean;
+  }>({
+    core: true,
+    timeline: true,
+    vendors: true,
+    ideas: true,
+    risks: true,
+  });
+  const abortControllerRef = useRef<AbortController | null>(null);
   const [isReplanning, setIsReplanning] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [activeDiffs, setActiveDiffs] = useState<PlanDiff[]>([]);
+  const [activePatchReason, setActivePatchReason] = useState<string | null>(null);
   const [history, setHistory] = useState<PlanHistoryItem[]>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('utsav_plan_history');
@@ -172,15 +211,15 @@ export default function App() {
   const [showHistoryDrawer, setShowHistoryDrawer] = useState<boolean>(false);
   const [clarifyingAnswer, setClarifyingAnswer] = useState<string>('');
   const [announcement, setAnnouncement] = useState<string>('');
-  const tabList: Array<'budget' | 'timeline' | 'vendors' | 'ideas'> = ['budget', 'timeline', 'vendors', 'ideas'];
+  const tabList: TabType[] = ['budget', 'timeline', 'vendors', 'ideas', 'risks'];
   const tabRefs = useRef<{ [key: string]: HTMLButtonElement | null }>({});
 
   const handleTabKeyDown = (
     e: React.KeyboardEvent,
-    currentTab: 'budget' | 'timeline' | 'vendors' | 'ideas'
+    currentTab: TabType
   ) => {
     const currentIndex = tabList.indexOf(currentTab);
-    let targetTab: 'budget' | 'timeline' | 'vendors' | 'ideas' | null = null;
+    let targetTab: TabType | null = null;
 
     if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
       e.preventDefault();
@@ -279,60 +318,219 @@ export default function App() {
     });
   };
 
-  // Intake: Call Gemini API
+  // Intake: Progressive plan generation via SSE (/api/plan/stream), fallback to /api/plan
   const handleGeneratePlan = async (brief: string, isInitial: boolean = false) => {
     setIsLoading(true);
+    setIsStreaming(true);
     setErrorMessage(null);
-    setAnnouncement('Generating your plan');
+    setAnnouncement('Generating your celebration plan...');
     setLastAction({ type: 'plan', brief });
 
+    // Abort previous in-flight generation if any
+    abortControllerRef.current?.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    setLoadedSections({
+      core: false,
+      timeline: false,
+      vendors: false,
+      ideas: false,
+      risks: false,
+    });
+
+    let streamedAnySection = false;
+    let accumulatedPlan: Partial<EventPlan> = {};
+
     try {
-      const response = await fetch('/api/plan', {
+      const response = await fetch('/api/plan/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ brief }),
+        signal: controller.signal,
       });
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `Server responded with status ${response.status}`);
+      if (!response.ok || !response.body) {
+        throw new Error('Streaming connection failed');
       }
 
-      const data = await response.json();
-      if (data.source) {
-        setPlanSource(data.source);
-        localStorage.setItem('utsav_plan_source', data.source);
-      }
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
 
-      const planValidation = eventPlanSchema.safeParse(data.plan);
-      if (!planValidation.success) {
-        console.error('Invalid plan schema received:', planValidation.error.issues);
-        throw new Error('Received an invalid event plan structure from the server.');
-      }
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
 
-      const rawPlan = planValidation.data;
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split('\n\n');
+        buffer = parts.pop() || '';
 
-      const normalizedPlan: EventPlan = {
-        ...rawPlan,
-        budget: normalizeBudgetPercentages(rawPlan.budget, rawPlan.total_budget),
-      };
+        for (const part of parts) {
+          const lines = part.split('\n');
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const jsonStr = line.slice(6).trim();
+              if (!jsonStr) continue;
 
-      savePlanWithHistory(normalizedPlan, isInitial ? 'Initial Plan' : `Brief: ${brief.slice(0, 30)}...`);
-      setActiveDiffs([]);
-      setAnnouncement(`Plan ready: ${normalizedPlan.title}`);
+              try {
+                const message = JSON.parse(jsonStr);
+                if (message.section === 'core') {
+                  streamedAnySection = true;
+                  const coreData = message.data;
+                  const normalizedBudget = normalizeBudgetPercentages(
+                    coreData.budget || [],
+                    coreData.total_budget
+                  );
 
-      if (!hasTriggeredInitialConfetti.current) {
-        triggerConfetti();
-        hasTriggeredInitialConfetti.current = true;
+                  accumulatedPlan = {
+                    ...accumulatedPlan,
+                    title: coreData.title,
+                    event_type: coreData.event_type,
+                    event_date: coreData.event_date,
+                    guests: coreData.guests,
+                    total_budget: coreData.total_budget,
+                    city: coreData.city,
+                    theme: coreData.theme,
+                    budget: normalizedBudget,
+                    clarifying_question: coreData.clarifying_question || null,
+                    timeline: accumulatedPlan.timeline || [],
+                    vendors: accumulatedPlan.vendors || [],
+                    ideas: accumulatedPlan.ideas || [],
+                    risks: accumulatedPlan.risks || [],
+                  };
+
+                  setPlan((prev) => ({
+                    ...prev,
+                    ...accumulatedPlan,
+                  } as EventPlan));
+
+                  setLoadedSections((prev) => ({ ...prev, core: true }));
+                  setIsLoading(false); // Reveal plan header and budget immediately!
+                  setAnnouncement(`Core budget details ready: ${coreData.title}`);
+                } else if (message.section === 'timeline') {
+                  streamedAnySection = true;
+                  const timelineData = message.data || [];
+                  accumulatedPlan.timeline = timelineData;
+                  setPlan((prev) => ({ ...prev, timeline: timelineData } as EventPlan));
+                  setLoadedSections((prev) => ({ ...prev, timeline: true }));
+                  setAnnouncement(`Timeline milestones ready: ${timelineData.length} tasks scheduled.`);
+                } else if (message.section === 'vendors') {
+                  streamedAnySection = true;
+                  const vendorsData = message.data || [];
+                  accumulatedPlan.vendors = vendorsData;
+                  setPlan((prev) => ({ ...prev, vendors: vendorsData } as EventPlan));
+                  setLoadedSections((prev) => ({ ...prev, vendors: true }));
+                  setAnnouncement(`Vendor hiring guide ready: ${vendorsData.length} categories.`);
+                } else if (message.section === 'ideas') {
+                  streamedAnySection = true;
+                  const ideasData = message.data || [];
+                  accumulatedPlan.ideas = ideasData;
+                  setPlan((prev) => ({ ...prev, ideas: ideasData } as EventPlan));
+                  setLoadedSections((prev) => ({ ...prev, ideas: true }));
+                  setAnnouncement(`Celebration inspirations ready: ${ideasData.length} concepts.`);
+                } else if (message.section === 'risks') {
+                  streamedAnySection = true;
+                  const risksData = message.data || [];
+                  accumulatedPlan.risks = risksData;
+                  setPlan((prev) => ({ ...prev, risks: risksData } as EventPlan));
+                  setLoadedSections((prev) => ({ ...prev, risks: true }));
+                  setAnnouncement(`Risk assessment ready: ${risksData.length} risks analyzed.`);
+                } else if (message.section === 'done') {
+                  setIsStreaming(false);
+                  setIsLoading(false);
+                  setActiveDiffs([]);
+                  setActivePatchReason(null);
+                  if (accumulatedPlan.title) {
+                    savePlanWithHistory(
+                      accumulatedPlan as EventPlan,
+                      isInitial ? 'Initial Plan' : `Brief: ${brief.slice(0, 30)}...`
+                    );
+                  }
+                  setAnnouncement('Living celebration plan generation complete!');
+                  if (!hasTriggeredInitialConfetti.current) {
+                    triggerConfetti();
+                    hasTriggeredInitialConfetti.current = true;
+                  }
+                } else if (message.section === 'error') {
+                  throw new Error(message.error || 'Server error during plan streaming');
+                }
+              } catch (parseErr) {
+                console.warn('Failed to parse SSE line:', jsonStr, parseErr);
+              }
+            }
+          }
+        }
       }
     } catch (err: any) {
-      console.error('Plan generation failed:', err);
+      if (err.name === 'AbortError') {
+        setAnnouncement('Plan generation cancelled.');
+        setIsLoading(false);
+        setIsStreaming(false);
+        return;
+      }
+
+      console.warn('Streaming plan generation failed, attempting non-streaming fallback:', err);
+
+      // If streaming didn't manage to load the core, use non-streaming /api/plan as fallback
+      if (!streamedAnySection) {
+        try {
+          const fallbackResp = await fetch('/api/plan', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ brief }),
+          });
+          if (!fallbackResp.ok) {
+            const errData = await fallbackResp.json().catch(() => ({}));
+            throw new Error(errData.error || `Server error ${fallbackResp.status}`);
+          }
+          const data = await fallbackResp.json();
+          const validation = eventPlanSchema.safeParse(data.plan);
+          if (validation.success) {
+            const normalized = {
+              ...validation.data,
+              budget: normalizeBudgetPercentages(validation.data.budget, validation.data.total_budget),
+            };
+            savePlanWithHistory(normalized, isInitial ? 'Initial Plan' : `Brief: ${brief.slice(0, 30)}...`);
+            setActiveDiffs([]);
+            setActivePatchReason(null);
+            setAnnouncement(`Plan ready: ${normalized.title}`);
+            setLoadedSections({
+              core: true,
+              timeline: true,
+              vendors: true,
+              ideas: true,
+              risks: true,
+            });
+            if (!hasTriggeredInitialConfetti.current) {
+              triggerConfetti();
+              hasTriggeredInitialConfetti.current = true;
+            }
+            return;
+          }
+        } catch (fallbackErr: any) {
+          console.error('Non-streaming fallback failed:', fallbackErr);
+        }
+      }
+
       const msg = err.message || 'Unable to generate event plan. Please check your connection or retry.';
       setErrorMessage(msg);
       setAnnouncement(msg);
     } finally {
       setIsLoading(false);
+      setIsStreaming(false);
+      abortControllerRef.current = null;
     }
+  };
+
+  const handleCancelGeneration = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setIsLoading(false);
+    setIsStreaming(false);
+    setAnnouncement('Plan generation cancelled.');
   };
 
   // Re-plan: Send current plan + instructions
@@ -377,9 +575,11 @@ export default function App() {
         budget: normalizeBudgetPercentages(updatedRaw.budget, updatedRaw.total_budget),
       };
 
-      // Compute diff in code
-      const diffs = computePlanDiff(plan, normalizedUpdated);
+      // Compute diffs: build directly from patch for exact chips if available, or fallback to full plan diff
+      const patchDiffs = data.patch ? computeDiffsFromPatch(plan, data.patch) : [];
+      const diffs = patchDiffs.length > 0 ? patchDiffs : computePlanDiff(plan, normalizedUpdated);
       setActiveDiffs(diffs);
+      setActivePatchReason(data.patch?.reason || null);
 
       savePlanWithHistory(normalizedUpdated, `Re-plan: ${changeInstruction}`, diffs);
       const diffSummaries = diffs.map((d) => d.summary).join(', ');
@@ -461,10 +661,21 @@ export default function App() {
     savePlanWithHistory(updatedPlan, 'Celebration Inspirations Updated');
   };
 
+  // Risks update from RisksTab
+  const handleUpdateRisks = (newRisks: RiskItem[]) => {
+    if (!plan) return;
+    const updatedPlan: EventPlan = {
+      ...plan,
+      risks: newRisks,
+    };
+    savePlanWithHistory(updatedPlan, 'Risk & Safeguards Kit Updated');
+  };
+
   // Import plan from JSON file
   const handleImportPlan = (importedPlan: EventPlan) => {
     savePlanWithHistory(importedPlan, `Imported: ${importedPlan.title || 'Saved Plan'}`);
     setActiveDiffs([]);
+    setActivePatchReason(null);
     triggerConfetti();
   };
 
@@ -559,7 +770,8 @@ export default function App() {
             <BriefInput
               initialBrief={DEFAULT_BRIEF}
               onGeneratePlan={handleGeneratePlan}
-              isLoading={isLoading}
+              isLoading={isLoading || isStreaming}
+              onCancel={handleCancelGeneration}
             />
 
             {plan && (
@@ -599,7 +811,11 @@ export default function App() {
                 {activeDiffs.length > 0 && (
                   <DiffViewer
                     diffs={activeDiffs}
-                    onDismiss={() => setActiveDiffs([])}
+                    reason={activePatchReason}
+                    onDismiss={() => {
+                      setActiveDiffs([]);
+                      setActivePatchReason(null);
+                    }}
                   />
                 )}
 
@@ -701,7 +917,10 @@ export default function App() {
                       tabIndex={activeTab === 'timeline' ? 0 : -1}
                     >
                       <Clock className="w-4 h-4" />
-                      <span>Timeline Milestones ({plan.timeline.length})</span>
+                      <span>
+                        Timeline Milestones ({plan.timeline ? plan.timeline.length : 0})
+                        {isStreaming && !loadedSections.timeline && ' ⏳'}
+                      </span>
                     </button>
 
                     <button
@@ -720,7 +939,10 @@ export default function App() {
                       tabIndex={activeTab === 'vendors' ? 0 : -1}
                     >
                       <Briefcase className="w-4 h-4" />
-                      <span>Vendors Guide ({plan.vendors.length})</span>
+                      <span>
+                        Vendors Guide ({plan.vendors ? plan.vendors.length : 0})
+                        {isStreaming && !loadedSections.vendors && ' ⏳'}
+                      </span>
                     </button>
 
                     <button
@@ -739,7 +961,32 @@ export default function App() {
                       tabIndex={activeTab === 'ideas' ? 0 : -1}
                     >
                       <Lightbulb className="w-4 h-4" />
-                      <span>Ideas & RSVP ({plan.ideas.length})</span>
+                      <span>
+                        Ideas & RSVP ({plan.ideas ? plan.ideas.length : 0})
+                        {isStreaming && !loadedSections.ideas && ' ⏳'}
+                      </span>
+                    </button>
+
+                    <button
+                      id="tab-risks"
+                      ref={(el) => { tabRefs.current['risks'] = el; }}
+                      onClick={() => setActiveTab('risks')}
+                      onKeyDown={(e) => handleTabKeyDown(e, 'risks')}
+                      className={`inline-flex items-center gap-2 px-4 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+                        activeTab === 'risks'
+                          ? 'bg-[#3B1F4A] text-white dark:bg-[#F5A623] dark:text-stone-950 shadow-xs'
+                          : 'bg-stone-100 dark:bg-stone-900 text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-200'
+                      }`}
+                      role="tab"
+                      aria-controls="panel-risks"
+                      aria-selected={activeTab === 'risks'}
+                      tabIndex={activeTab === 'risks' ? 0 : -1}
+                    >
+                      <ShieldAlert className="w-4 h-4" />
+                      <span>
+                        Risks & Safeguards ({plan.risks ? plan.risks.length : 0})
+                        {isStreaming && !loadedSections.risks && ' ⏳'}
+                      </span>
                     </button>
                   </div>
                 </div>
@@ -770,12 +1017,22 @@ export default function App() {
                     tabIndex={0}
                     className="focus:outline-none"
                   >
-                    <TimelineTab
-                      timeline={plan.timeline}
-                      eventDate={plan.event_date}
-                      plan={plan}
-                      onUpdateTimeline={handleUpdateTimeline}
-                    />
+                    {isStreaming && !loadedSections.timeline ? (
+                      <div className="p-8 text-center bg-white/70 dark:bg-[#23152C]/70 rounded-3xl border border-stone-200 dark:border-stone-800 animate-pulse">
+                        <Clock className="w-8 h-8 text-[#B45309] dark:text-[#F5A623] mx-auto mb-2 animate-spin" />
+                        <p className="text-sm font-semibold">Sequencing timeline milestones...</p>
+                        <p className="text-xs text-stone-500 dark:text-stone-400 mt-1">
+                          Arranging countdown checklist backward from {plan.event_date}
+                        </p>
+                      </div>
+                    ) : (
+                      <TimelineTab
+                        timeline={plan.timeline || []}
+                        eventDate={plan.event_date}
+                        plan={plan}
+                        onUpdateTimeline={handleUpdateTimeline}
+                      />
+                    )}
                   </div>
                 )}
 
@@ -787,11 +1044,21 @@ export default function App() {
                     tabIndex={0}
                     className="focus:outline-none"
                   >
-                    <VendorsTab
-                      vendors={plan.vendors}
-                      city={plan.city}
-                      onUpdateVendors={handleUpdateVendors}
-                    />
+                    {isStreaming && !loadedSections.vendors ? (
+                      <div className="p-8 text-center bg-white/70 dark:bg-[#23152C]/70 rounded-3xl border border-stone-200 dark:border-stone-800 animate-pulse">
+                        <Briefcase className="w-8 h-8 text-[#B45309] dark:text-[#F5A623] mx-auto mb-2 animate-bounce" />
+                        <p className="text-sm font-semibold">Compiling vendor vetting guides...</p>
+                        <p className="text-xs text-stone-500 dark:text-stone-400 mt-1">
+                          Tailoring local price benchmarks for {plan.city}
+                        </p>
+                      </div>
+                    ) : (
+                      <VendorsTab
+                        vendors={plan.vendors || []}
+                        city={plan.city}
+                        onUpdateVendors={handleUpdateVendors}
+                      />
+                    )}
                   </div>
                 )}
 
@@ -803,10 +1070,33 @@ export default function App() {
                     tabIndex={0}
                     className="focus:outline-none"
                   >
-                    <IdeasTab
-                      ideas={plan.ideas}
-                      eventTitle={plan.title}
-                      onUpdateIdeas={handleUpdateIdeas}
+                    {isStreaming && !loadedSections.ideas ? (
+                      <div className="p-8 text-center bg-white/70 dark:bg-[#23152C]/70 rounded-3xl border border-stone-200 dark:border-stone-800 animate-pulse">
+                        <Lightbulb className="w-8 h-8 text-[#B45309] dark:text-[#F5A623] mx-auto mb-2 animate-pulse" />
+                        <p className="text-sm font-semibold">Crafting celebration ideas & RSVP templates...</p>
+                      </div>
+                    ) : (
+                      <IdeasTab
+                        ideas={plan.ideas || []}
+                        eventTitle={plan.title}
+                        onUpdateIdeas={handleUpdateIdeas}
+                      />
+                    )}
+                  </div>
+                )}
+
+                {activeTab === 'risks' && (
+                  <div
+                    role="tabpanel"
+                    id="panel-risks"
+                    aria-labelledby="tab-risks"
+                    tabIndex={0}
+                    className="focus:outline-none"
+                  >
+                    <RisksTab
+                      risks={plan.risks || []}
+                      isLoading={isStreaming && !loadedSections.risks}
+                      onUpdateRisks={handleUpdateRisks}
                     />
                   </div>
                 )}

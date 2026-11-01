@@ -10,6 +10,7 @@ interface BriefInputProps {
   initialBrief?: string;
   onGeneratePlan: (brief: string) => void;
   isLoading: boolean;
+  onCancel?: () => void;
 }
 
 const EXAMPLE_BRIEFS = [
@@ -23,6 +24,7 @@ export const BriefInput: React.FC<BriefInputProps> = ({
   initialBrief = "Sister's sangeet, 150 guests, ₹6L, 14 Dec, Vizag, retro Bollywood",
   onGeneratePlan,
   isLoading,
+  onCancel,
 }) => {
   const [brief, setBrief] = useState(initialBrief);
   const [isListening, setIsListening] = useState(false);
@@ -166,23 +168,37 @@ export const BriefInput: React.FC<BriefInputProps> = ({
         </div>
 
         {/* Primary CTA */}
-        <button
-          type="submit"
-          disabled={isLoading || !brief.trim()}
-          className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-[#3B1F4A] hover:bg-[#2C1638] text-[#FFF8EE] dark:bg-[#F5A623] dark:hover:bg-[#E59815] dark:text-stone-950 font-semibold text-xs sm:text-sm shadow-xs disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
-        >
-          {isLoading ? (
-            <>
-              <RefreshCw className="w-4 h-4 animate-spin text-[#F5A623] dark:text-stone-950" />
-              <span>Generating Living Plan...</span>
-            </>
-          ) : (
-            <>
-              <Sparkles className="w-4 h-4 text-[#F5A623] dark:text-stone-950" />
-              <span>Generate Celebration Plan</span>
-            </>
+        <div className="flex gap-2">
+          <button
+            type="submit"
+            disabled={isLoading || !brief.trim()}
+            className="flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-[#3B1F4A] hover:bg-[#2C1638] text-[#FFF8EE] dark:bg-[#F5A623] dark:hover:bg-[#E59815] dark:text-stone-950 font-semibold text-xs sm:text-sm shadow-xs disabled:opacity-50 disabled:cursor-not-allowed transition-all cursor-pointer"
+          >
+            {isLoading ? (
+              <>
+                <RefreshCw className="w-4 h-4 animate-spin text-[#F5A623] dark:text-stone-950" />
+                <span>Generating Living Plan...</span>
+              </>
+            ) : (
+              <>
+                <Sparkles className="w-4 h-4 text-[#F5A623] dark:text-stone-950" />
+                <span>Generate Celebration Plan</span>
+              </>
+            )}
+          </button>
+
+          {isLoading && onCancel && (
+            <button
+              type="button"
+              onClick={onCancel}
+              className="px-4 py-3 rounded-xl bg-red-100 hover:bg-red-200 dark:bg-red-950/70 dark:hover:bg-red-900/70 text-red-700 dark:text-red-300 font-bold text-xs sm:text-sm border border-red-300 dark:border-red-800 transition-colors cursor-pointer shrink-0"
+              aria-label="Cancel plan generation"
+              title="Cancel plan generation"
+            >
+              Cancel
+            </button>
           )}
-        </button>
+        </div>
       </form>
     </div>
   );
