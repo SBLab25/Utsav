@@ -11,6 +11,8 @@ import {
   EventPlanSchema,
   BudgetItemSchema,
   VendorRequirementSchema,
+  EventDaySchema,
+  VendorQuoteSchema,
   sanitizeDraft,
   toGeminiSchema,
 } from './plan.ts';
@@ -203,5 +205,139 @@ describe('planSchema', () => {
     expect(cleaned.includes('\x1F')).toBe(false);
     expect(/ignore\s+previous\s+instructions/i.test(cleaned)).toBe(false);
     expect(cleaned.includes('[filtered]')).toBe(true);
+  });
+
+  it('EventDaySchema validates single-day specs and strips invalid values', () => {
+    const validDay = {
+      id: 'day-1',
+      day_number: 1,
+      title: 'Mehendi & Sangeet',
+      date: '2026-12-13',
+      time_slot: 'Evening (5 PM - 11 PM)',
+      venue: 'Palace Courtyard',
+      budget_allocated: 200000,
+      dress_code: 'Yellow & Pastels',
+      notes: 'Floral jewelry arrival at 4 PM',
+    };
+    const parsed = EventDaySchema.safeParse(validDay);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.title).toBe('Mehendi & Sangeet');
+      expect(parsed.data.budget_allocated).toBe(200000);
+    }
+
+    // Missing title or invalid day_number
+    expect(EventDaySchema.safeParse({ day_number: 0 }).success).toBe(false);
+    expect(EventDaySchema.safeParse({ day_number: 1, title: '' }).success).toBe(false);
+  });
+
+  it('VendorQuoteSchema validates quotes and rating bounds', () => {
+    const validQuote = {
+      id: 'q-101',
+      vendor_name: 'Royal Caterers',
+      contact_person: 'Suresh Kumar',
+      phone_or_email: '+91 98765 43210',
+      quote_amount: 175000,
+      inclusions: ['Live chaat station', 'Dessert buffet', 'Service staff'],
+      status: 'shortlisted' as const,
+      rating: 4.8,
+      notes: 'Includes food tasting session beforehand',
+    };
+    const parsed = VendorQuoteSchema.safeParse(validQuote);
+    expect(parsed.success).toBe(true);
+
+    // Negative quote amount or out-of-range rating
+    expect(VendorQuoteSchema.safeParse({ ...validQuote, quote_amount: -100 }).success).toBe(false);
+    expect(VendorQuoteSchema.safeParse({ ...validQuote, rating: 6.5 }).success).toBe(false);
+    expect(VendorQuoteSchema.safeParse({ ...validQuote, status: 'invalid-status' }).success).toBe(false);
+  });
+
+  it('eventPlanSchema validates a complete multi-day celebration plan with quotes', () => {
+    const multiDayPlan = {
+      ...SAMPLE_VALID_PLAN,
+      host_names: 'Aarav & Priya',
+      event_days: [
+        {
+          id: 'day-1',
+          day_number: 1,
+          title: 'Haldi & Chooda',
+          date: '2026-12-13',
+          time_slot: 'Morning',
+          venue: 'Bride Residence Lawn',
+          budget_allocated: 100000,
+        },
+        {
+          id: 'day-2',
+          day_number: 2,
+          title: 'Sangeet & Cocktail',
+          date: '2026-12-13',
+          time_slot: 'Evening',
+          venue: 'Grand Ball Room',
+          budget_allocated: 250000,
+        },
+        {
+          id: 'day-3',
+          day_number: 3,
+          title: 'Wedding Ceremony & Reception',
+          date: '2026-12-14',
+          time_slot: 'Evening',
+          venue: 'Beachside Mandap',
+          budget_allocated: 250000,
+        },
+      ],
+      budget: [
+        { category: 'Venue & Decor', pct: 40, locked: false, day_number: 2 },
+        { category: 'Catering', pct: 30, locked: false, day_number: 3 },
+        { category: 'Haldi Kit', pct: 10, locked: false, day_number: 1 },
+        { category: 'General Buffer', pct: 20, locked: false },
+      ],
+      timeline: [
+        { id: 't1', t_minus_days: 30, title: 'Hire Choreographer', owner: 'Priya', done: true },
+        { id: 't2', t_minus_days: 1, title: 'Haldi Stage Setup', owner: 'Decor Team', done: false, day_number: 1, time_slot: 'Morning' },
+        { id: 't3', t_minus_days: 0, title: 'Baraat Welcome', owner: 'Family', done: false, day_number: 3, time_slot: 'Evening' },
+      ],
+      vendors: [
+        {
+          type: 'DJ & Sound',
+          est_low: 40000,
+          est_high: 60000,
+          questions: ['Do you have Punjabi and Bollywood mixes?'],
+          red_flags: ['No insurance'],
+          outreach_message: 'Hi, looking for sangeet DJ.',
+          quotes: [
+            {
+              id: 'q1',
+              vendor_name: 'DJ Sunny',
+              quote_amount: 45000,
+              inclusions: ['4 hrs sound', 'Console'],
+              status: 'selected' as const,
+              rating: 4.9,
+            },
+            {
+              id: 'q2',
+              vendor_name: 'Sound Wave',
+              quote_amount: 55000,
+              inclusions: ['6 hrs sound', 'Laser truss'],
+              status: 'shortlisted' as const,
+              rating: 4.7,
+            },
+          ],
+        },
+      ],
+    };
+
+    const parsed = eventPlanSchema.safeParse(multiDayPlan);
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.host_names).toBe('Aarav & Priya');
+      expect(parsed.data.event_days).toHaveLength(3);
+      expect(parsed.data.vendors[0].quotes).toHaveLength(2);
+      expect(parsed.data.vendors[0].quotes?.[0].status).toBe('selected');
+    }
+
+    const sanitized = sanitizeDraft(multiDayPlan);
+    expect(sanitized.host_names).toBe('Aarav & Priya');
+    expect(sanitized.event_days?.length).toBe(3);
+    expect(sanitized.vendors?.[0].quotes?.length).toBe(2);
   });
 });

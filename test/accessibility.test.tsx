@@ -18,6 +18,7 @@ import { StatusBanner } from '../src/components/StatusBanner.tsx';
 import { BriefInput } from '../src/components/BriefInput.tsx';
 import { ReplanBox } from '../src/components/ReplanBox.tsx';
 import { DiffViewer } from '../src/components/DiffViewer.tsx';
+import { InvitationCardModal } from '../src/components/InvitationCardModal.tsx';
 import type { EventPlan, BudgetItem, TimelineTask, VendorRequirement, IdeaItem, PlanHistoryItem } from '../src/types/plan.ts';
 
 // Helper for type-safe vitest-axe matcher invocation
@@ -240,6 +241,17 @@ describe('Accessibility (WCAG 2.1 AA) via vitest-axe', () => {
           },
         ]}
         onDismiss={vi.fn()}
+      />
+    );
+    const results = await axe(container);
+    expectNoViolations(results);
+  });
+
+  it('renders InvitationCardModal with no axe violations', async () => {
+    const { container } = render(
+      <InvitationCardModal
+        plan={SAMPLE_PLAN}
+        onClose={vi.fn()}
       />
     );
     const results = await axe(container);

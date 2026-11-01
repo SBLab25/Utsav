@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { CoPlannerPanel } from './CoPlannerPanel.tsx';
@@ -39,6 +39,9 @@ function Harness() {
 }
 
 describe('CoPlannerPanel', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
   it('does not change the plan before Apply is pressed', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
@@ -71,6 +74,65 @@ describe('CoPlannerPanel', () => {
     expect(screen.getByText('Decor is within its allocation.')).toBeInTheDocument();
     expect(screen.queryByText(/\*\*/)).not.toBeInTheDocument();
     expect(screen.queryByText(/^\*/)).not.toBeInTheDocument();
+    vi.unstubAllGlobals();
+  });
+
+  it('triggers voice audio playback when Listen button is clicked', async () => {
+    const mockSpeak = vi.fn();
+    const mockCancel = vi.fn();
+    (window as any).speechSynthesis = {
+      speak: mockSpeak,
+      cancel: mockCancel,
+      getVoices: vi.fn().mockReturnValue([{ name: 'Test Voice', lang: 'en-IN' }]),
+      speaking: false,
+    };
+    (window as any).SpeechSynthesisUtterance = function (this: any, text: string) {
+      this.text = text;
+      this.lang = 'en-IN';
+      this.onstart = null;
+      this.onend = null;
+    };
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        reply: 'Here are the recommended venue options for your review.',
+        proposals: [],
+      }),
+    }));
+
+    render(<Harness />);
+    fireEvent.click(screen.getByRole('button', { name: /Move ₹20,000/i }));
+    await waitFor(() => expect(screen.getAllByRole('button', { name: /Listen/i })[0]).toBeInTheDocument());
+
+    fireEvent.click(screen.getAllByRole('button', { name: /Listen/i })[0]);
+    expect(mockSpeak).toHaveBeenCalled();
+
+    delete (window as any).speechSynthesis;
+    delete (window as any).SpeechSynthesisUtterance;
+    vi.unstubAllGlobals();
+  });
+
+  it('clears conversation history when Clear button is clicked', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        reply: 'I suggest booking the DJ.',
+        proposals: [],
+      }),
+    }));
+
+    render(<Harness />);
+    fireEvent.click(screen.getByRole('button', { name: /Move ₹20,000/i }));
+    await waitFor(() => expect(screen.getByText('I suggest booking the DJ.')).toBeInTheDocument());
+
+    const clearButton = screen.getByRole('button', { name: /Clear conversation history/i });
+    expect(clearButton).toBeInTheDocument();
+    fireEvent.click(clearButton);
+
+    expect(screen.queryByText('I suggest booking the DJ.')).not.toBeInTheDocument();
+    expect(screen.getByText('Let’s make the plan better')).toBeInTheDocument();
+
     vi.unstubAllGlobals();
   });
 });

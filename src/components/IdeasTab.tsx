@@ -17,7 +17,11 @@ import {
   Plus,
   Trash2,
   Search,
-  X
+  X,
+  Maximize2,
+  RotateCw,
+  Download,
+  Image as ImageIcon
 } from 'lucide-react';
 import { IdeaItem } from '../types/plan.ts';
 
@@ -26,6 +30,7 @@ interface IdeasTabProps {
   eventTitle: string;
   onUpdateIdeas?: (newIdeas: IdeaItem[]) => void;
   language?: 'en' | 'hi' | 'te' | 'bn';
+  onOpenInvitationDesigner?: () => void;
 }
 
 const CATEGORY_ICONS: Record<string, React.ReactNode> = {
@@ -46,7 +51,13 @@ const CATEGORY_LABELS: Record<string, string> = {
   rsvp: 'WhatsApp RSVP Template',
 };
 
-export const IdeasTab: React.FC<IdeasTabProps> = ({ ideas, eventTitle, onUpdateIdeas, language = 'en' }) => {
+export const IdeasTab: React.FC<IdeasTabProps> = ({
+  ideas,
+  eventTitle,
+  onUpdateIdeas,
+  language = 'en',
+  onOpenInvitationDesigner,
+}) => {
   const [selectedFilter, setSelectedFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -66,6 +77,88 @@ export const IdeasTab: React.FC<IdeasTabProps> = ({ ideas, eventTitle, onUpdateI
   const [newCategory, setNewCategory] = useState<string>('entertainment');
   const [newTitle, setNewTitle] = useState<string>('');
   const [newDescription, setNewDescription] = useState<string>('');
+
+  // Image Concept Art Generation State
+  const [generatingImageIndex, setGeneratingImageIndex] = useState<number | null>(null);
+  const [selectedLightboxImage, setSelectedLightboxImage] = useState<{ url: string; title: string; prompt?: string } | null>(null);
+  const [isCustomVisualModalOpen, setIsCustomVisualModalOpen] = useState<boolean>(false);
+  const [customVisualPrompt, setCustomVisualPrompt] = useState<string>('');
+  const [customVisualCategory, setCustomVisualCategory] = useState<string>('decor');
+  const [customVisualAspect, setCustomVisualAspect] = useState<'4:3' | '16:9' | '1:1'>('16:9');
+  const [isGeneratingCustomVisual, setIsGeneratingCustomVisual] = useState<boolean>(false);
+
+  const handleGenerateImageForIdea = async (index: number, idea: IdeaItem) => {
+    if (!onUpdateIdeas || generatingImageIndex !== null) return;
+    setGeneratingImageIndex(index);
+    try {
+      const response = await fetch('/api/generate-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: `${idea.title}: ${idea.description}`,
+          theme: eventTitle,
+          category: idea.category,
+          aspectRatio: '16:9',
+        }),
+      });
+      const data = await response.json();
+      if (response.ok && data.imageUrl) {
+        const updated = ideas.map((item, i) =>
+          i === index
+            ? {
+                ...item,
+                image_url: data.imageUrl,
+                image_prompt: data.prompt,
+                image_source: data.source,
+              }
+            : item
+        );
+        onUpdateIdeas(updated);
+      }
+    } catch (e) {
+      console.error('Image generation failed', e);
+    } finally {
+      setGeneratingImageIndex(null);
+    }
+  };
+
+  const handleGenerateCustomVisual = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!customVisualPrompt.trim() || !onUpdateIdeas || isGeneratingCustomVisual) return;
+    setIsGeneratingCustomVisual(true);
+    try {
+      const response = await fetch('/api/generate-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: customVisualPrompt.trim(),
+          theme: eventTitle,
+          category: customVisualCategory,
+          aspectRatio: customVisualAspect,
+        }),
+      });
+      const data = await response.json();
+      if (response.ok && data.imageUrl) {
+        const newIdea: IdeaItem = {
+          id: `concept-art-${Date.now()}`,
+          category: customVisualCategory,
+          title: customVisualPrompt.slice(0, 50).trim(),
+          description: customVisualPrompt.trim(),
+          favorited: true,
+          image_url: data.imageUrl,
+          image_prompt: data.prompt,
+          image_source: data.source,
+        };
+        onUpdateIdeas([...ideas, newIdea]);
+        setIsCustomVisualModalOpen(false);
+        setCustomVisualPrompt('');
+      }
+    } catch (e) {
+      console.error('Custom visual creation failed', e);
+    } finally {
+      setIsGeneratingCustomVisual(false);
+    }
+  };
 
   const handleCopy = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
@@ -150,6 +243,29 @@ export const IdeasTab: React.FC<IdeasTabProps> = ({ ideas, eventTitle, onUpdateI
           </div>
 
           <div className="flex items-center gap-2 self-start sm:self-auto">
+            {onOpenInvitationDesigner && (
+              <button
+                type="button"
+                onClick={onOpenInvitationDesigner}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-[#B45309] dark:text-[#F5A623] border border-amber-500/30 transition-colors cursor-pointer shadow-xs"
+              >
+                <Palette className="w-3.5 h-3.5" />
+                <span>Design Invitation Card</span>
+              </button>
+            )}
+
+            {onUpdateIdeas && (
+              <button
+                type="button"
+                onClick={() => setIsCustomVisualModalOpen(true)}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-xl bg-purple-500/15 hover:bg-purple-500/25 text-purple-700 dark:text-purple-300 border border-purple-500/30 transition-colors cursor-pointer shadow-xs"
+                title="Generate custom visual concepts with Imagen 3"
+              >
+                <ImageIcon className="w-3.5 h-3.5" />
+                <span>Imagen Decor Studio</span>
+              </button>
+            )}
+
             {onUpdateIdeas && (
               <button
                 onClick={() => setIsAddModalOpen(true)}
@@ -331,6 +447,45 @@ export const IdeasTab: React.FC<IdeasTabProps> = ({ ideas, eventTitle, onUpdateI
                     </div>
                   </div>
 
+                  {/* Concept Visual Banner */}
+                  {idea.image_url && (
+                    <div className="relative group overflow-hidden rounded-xl border border-stone-200/80 dark:border-stone-800 bg-stone-950 aspect-video mb-2.5">
+                      <img
+                        src={idea.image_url}
+                        alt={idea.title}
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300 cursor-pointer"
+                        onClick={() => setSelectedLightboxImage({ url: idea.image_url!, title: idea.title, prompt: idea.image_prompt || idea.description })}
+                      />
+                      <div className="absolute top-2 left-2 px-2 py-0.5 rounded-full bg-stone-900/85 backdrop-blur-xs text-[10px] font-bold text-amber-400 border border-amber-500/30 flex items-center gap-1 shadow-xs">
+                        <Sparkles className="w-3 h-3" />
+                        <span>{idea.image_source === 'imagen' ? 'Imagen Concept' : 'Themed Concept'}</span>
+                      </div>
+                      <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedLightboxImage({ url: idea.image_url!, title: idea.title, prompt: idea.image_prompt || idea.description })}
+                          className="p-1.5 rounded-lg bg-stone-900/80 hover:bg-stone-900 text-white backdrop-blur-xs text-xs cursor-pointer"
+                          title="View full-size visual"
+                          aria-label="View full-size visual"
+                        >
+                          <Maximize2 className="w-3.5 h-3.5" />
+                        </button>
+                        {onUpdateIdeas && (
+                          <button
+                            type="button"
+                            onClick={() => handleGenerateImageForIdea(index, idea)}
+                            disabled={generatingImageIndex === index}
+                            className="p-1.5 rounded-lg bg-stone-900/80 hover:bg-stone-900 text-white backdrop-blur-xs text-xs cursor-pointer"
+                            title="Regenerate visual"
+                            aria-label="Regenerate visual"
+                          >
+                            <RotateCw className={`w-3.5 h-3.5 ${generatingImageIndex === index ? 'animate-spin text-amber-400' : ''}`} />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
                   <h4 className="font-serif text-base font-bold text-[#3B1F4A] dark:text-[#FFF8EE]">
                     {idea.title}
                   </h4>
@@ -353,7 +508,21 @@ export const IdeasTab: React.FC<IdeasTabProps> = ({ ideas, eventTitle, onUpdateI
 
                 {!isTextCopyable && (
                   <div className="pt-3 mt-3 border-t border-stone-100 dark:border-stone-800/80 flex items-center justify-between text-[11px] text-stone-400 dark:text-stone-500">
-                    <span>Celebration Inspiration</span>
+                    <div className="flex items-center gap-2">
+                      {onUpdateIdeas && !idea.image_url && (
+                        <button
+                          type="button"
+                          onClick={() => handleGenerateImageForIdea(index, idea)}
+                          disabled={generatingImageIndex === index}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-lg bg-purple-500/10 hover:bg-purple-500/20 text-purple-700 dark:text-purple-300 border border-purple-500/25 transition-colors cursor-pointer"
+                          title="Generate concept visual using Imagen"
+                          aria-label={`Visualize decor for ${idea.title}`}
+                        >
+                          <Sparkles className={`w-3 h-3 text-purple-500 ${generatingImageIndex === index ? 'animate-spin' : ''}`} />
+                          <span>{generatingImageIndex === index ? 'Generating visual…' : 'Visualize Decor'}</span>
+                        </button>
+                      )}
+                    </div>
                     <button
                       onClick={() => handleCopy(`${idea.title}: ${idea.description}`, copyId)}
                       className="inline-flex items-center gap-1 hover:text-stone-700 dark:hover:text-stone-200 transition-colors cursor-pointer font-medium"
@@ -455,6 +624,161 @@ export const IdeasTab: React.FC<IdeasTabProps> = ({ ideas, eventTitle, onUpdateI
                   className="px-4 py-2 rounded-xl bg-[#3B1F4A] text-white dark:bg-[#F5A623] dark:text-stone-950 font-semibold hover:opacity-90 cursor-pointer shadow-xs"
                 >
                   Save Idea
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Lightbox Modal */}
+      {selectedLightboxImage && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={selectedLightboxImage.title}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in"
+          onClick={() => setSelectedLightboxImage(null)}
+        >
+          <div
+            className="relative max-w-4xl w-full bg-stone-900 rounded-3xl overflow-hidden border border-stone-800 shadow-2xl space-y-4 p-4 sm:p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-3 text-white">
+              <div>
+                <h3 className="font-serif text-lg font-bold">{selectedLightboxImage.title}</h3>
+                {selectedLightboxImage.prompt && (
+                  <p className="text-xs text-stone-400 mt-0.5 max-w-xl">{selectedLightboxImage.prompt}</p>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <a
+                  href={selectedLightboxImage.url}
+                  download={`utsav_decor_${selectedLightboxImage.title.toLowerCase().replace(/[^a-z0-9]+/g, '_')}.png`}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-xl bg-amber-500 hover:bg-amber-600 text-stone-950 transition-colors cursor-pointer"
+                  aria-label="Download concept visual"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Download</span>
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setSelectedLightboxImage(null)}
+                  className="p-2 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-300 transition-colors cursor-pointer"
+                  aria-label="Close preview"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            <div className="rounded-2xl overflow-hidden bg-black max-h-[70vh] flex items-center justify-center">
+              <img
+                src={selectedLightboxImage.url}
+                alt={selectedLightboxImage.title}
+                className="max-h-[70vh] w-auto object-contain mx-auto"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Custom Decor Studio Modal */}
+      {isCustomVisualModalOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Imagen Decor Concept Studio"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in"
+        >
+          <div className="bg-white dark:bg-[#23152C] rounded-3xl p-6 max-w-lg w-full border border-stone-200 dark:border-stone-800 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-xl bg-purple-500/15 text-purple-700 dark:text-purple-300">
+                  <ImageIcon className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-serif text-lg font-bold text-[#3B1F4A] dark:text-[#FFF8EE]">
+                    Imagen Decor Studio
+                  </h3>
+                  <p className="text-xs text-stone-500 dark:text-stone-400">
+                    Generate custom architectural celebration artwork
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsCustomVisualModalOpen(false)}
+                className="p-2 rounded-xl text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-800 cursor-pointer"
+                aria-label="Close studio"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleGenerateCustomVisual} className="space-y-4 text-xs">
+              <div>
+                <label className="block font-semibold text-stone-700 dark:text-stone-300 mb-1">
+                  Decor or Theme Concept Description *
+                </label>
+                <textarea
+                  rows={3}
+                  required
+                  placeholder="e.g. Royal Rajasthani Mandap with floating lotus candles, brass bells, cascading red roses and fairy light canopy..."
+                  value={customVisualPrompt}
+                  onChange={(e) => setCustomVisualPrompt(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-700 text-stone-800 dark:text-stone-200 focus:outline-none focus:border-[#F5A623]"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-stone-700 dark:text-stone-300 mb-1">
+                    Category
+                  </label>
+                  <select
+                    value={customVisualCategory}
+                    onChange={(e) => setCustomVisualCategory(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-700 text-stone-800 dark:text-stone-200 focus:outline-none focus:border-[#F5A623]"
+                  >
+                    <option value="decor">Decor & Ambience</option>
+                    <option value="theme">Theme & Mood</option>
+                    <option value="mandap">Mandap & Stage</option>
+                    <option value="entrance">Entrance & Pathway</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-semibold text-stone-700 dark:text-stone-300 mb-1">
+                    Aspect Ratio
+                  </label>
+                  <select
+                    value={customVisualAspect}
+                    onChange={(e) => setCustomVisualAspect(e.target.value as '4:3' | '16:9' | '1:1')}
+                    className="w-full px-3 py-2 rounded-xl bg-stone-50 dark:bg-stone-900 border border-stone-200 dark:border-stone-700 text-stone-800 dark:text-stone-200 focus:outline-none focus:border-[#F5A623]"
+                  >
+                    <option value="16:9">16:9 (Cinematic Banner)</option>
+                    <option value="4:3">4:3 (Standard)</option>
+                    <option value="1:1">1:1 (Square)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-stone-100 dark:border-stone-800">
+                <button
+                  type="button"
+                  onClick={() => setIsCustomVisualModalOpen(false)}
+                  className="px-4 py-2 rounded-xl border border-stone-200 dark:border-stone-700 text-stone-600 dark:text-stone-300 hover:bg-stone-50 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!customVisualPrompt.trim() || isGeneratingCustomVisual}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#3B1F4A] text-white dark:bg-[#F5A623] dark:text-stone-950 font-semibold hover:opacity-90 disabled:opacity-50 cursor-pointer shadow-xs"
+                >
+                  <Sparkles className={`w-3.5 h-3.5 ${isGeneratingCustomVisual ? 'animate-spin' : ''}`} />
+                  <span>{isGeneratingCustomVisual ? 'Generating with Imagen...' : 'Generate & Add to Plan'}</span>
                 </button>
               </div>
             </form>

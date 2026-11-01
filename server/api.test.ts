@@ -528,4 +528,46 @@ describe('server/api.test.ts', () => {
     expect(res.text).toContain('"source":"gemini"');
     expect(res.text).toContain('"section":"done"');
   });
+
+  it('POST /api/generate-image generates concept visual and validates input', async () => {
+    // Valid request
+    const res = await request(app)
+      .post('/api/generate-image')
+      .send({
+        prompt: 'Marigold entrance arch with brass lamps',
+        theme: "Sister's Sangeet",
+        category: 'decor',
+        aspectRatio: '16:9',
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.imageUrl).toBeDefined();
+    expect(res.body.imageUrl).toMatch(/^data:image\//);
+    expect(res.body.prompt).toBe('Marigold entrance arch with brass lamps');
+    expect(['imagen', 'curated']).toContain(res.body.source);
+
+    // Invalid request (missing prompt)
+    const invalidRes = await request(app)
+      .post('/api/generate-image')
+      .send({ prompt: '' });
+
+    expect(invalidRes.status).toBe(400);
+    expect(invalidRes.body.error).toBe('Invalid image generation request');
+  });
+
+  it('POST /api/tts prepares clean spoken text and voice hints', async () => {
+    const res = await request(app)
+      .post('/api/tts')
+      .send({
+        text: '### Sangeet Notice\n**Great!** We booked the hall for ₹90,000.',
+        language: 'hi',
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('ready');
+    expect(res.body.voiceHint).toBe('hi-IN');
+    expect(res.body.text).not.toContain('###');
+    expect(res.body.text).not.toContain('**');
+    expect(res.body.text).toContain('Great! We booked the hall');
+  });
 });

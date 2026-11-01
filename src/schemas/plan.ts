@@ -5,12 +5,37 @@
 
 import { z } from 'zod';
 
+export const EventDaySchema = z.object({
+  id: z.string().min(1).max(120),
+  day_number: z.number().int().min(1).max(10),
+  title: z.string().min(1).max(120),
+  date: z.string().max(120).optional(),
+  time_slot: z.string().max(120).optional(),
+  venue: z.string().max(120).optional(),
+  budget_allocated: z.number().int().nonnegative().optional(),
+  dress_code: z.string().max(120).optional(),
+  notes: z.string().max(500).optional(),
+});
+
+export const VendorQuoteSchema = z.object({
+  id: z.string().min(1).max(120),
+  vendor_name: z.string().min(1).max(120),
+  contact_person: z.string().max(120).optional(),
+  phone_or_email: z.string().max(120).optional(),
+  quote_amount: z.number().int().nonnegative(),
+  inclusions: z.array(z.string().max(250)).max(10).default([]),
+  status: z.enum(['received', 'shortlisted', 'selected', 'rejected']).default('received'),
+  rating: z.number().min(1).max(5).optional(),
+  notes: z.string().max(500).optional(),
+});
+
 export const BudgetItemSchema = z.object({
   category: z.string().min(1).max(120),
   pct: z.number().min(0).max(100),
   locked: z.boolean().default(false),
   amount: z.number().int().nonnegative().optional(),
   spent: z.number().int().nonnegative().default(0).optional(),
+  day_number: z.number().int().min(1).max(10).optional(),
 });
 
 export const TimelineTaskSchema = z.object({
@@ -21,6 +46,8 @@ export const TimelineTaskSchema = z.object({
   id: z.string().max(120).optional(),
   target_date: z.string().max(120).optional(),
   is_overdue: z.boolean().optional(),
+  day_number: z.number().int().min(1).max(10).optional(),
+  time_slot: z.string().max(120).optional(),
 });
 
 export const VendorRequirementSchema = z.object({
@@ -33,6 +60,7 @@ export const VendorRequirementSchema = z.object({
   status: z.enum(['todo', 'contacted', 'shortlisted', 'booked']).default('todo').optional(),
   quote: z.number().int().nonnegative().optional(),
   notes: z.string().max(1000).optional(),
+  quotes: z.array(VendorQuoteSchema).default([]).optional(),
 });
 
 export const IdeaItemSchema = z.object({
@@ -41,6 +69,9 @@ export const IdeaItemSchema = z.object({
   title: z.string().min(1).max(120),
   description: z.string().max(1000),
   favorited: z.boolean().optional(),
+  image_url: z.string().max(250000).optional(),
+  image_prompt: z.string().max(1000).optional(),
+  image_source: z.enum(['imagen', 'curated', 'custom']).optional(),
 });
 
 export const RiskItemSchema = z.object({
@@ -64,6 +95,21 @@ export const GuestSchema = z.object({
   plus_ones: z.number().int().min(0).max(10).default(0),
 });
 
+export const PaymentRecordSchema = z.object({
+  id: z.string().min(1).max(120),
+  category: z.string().min(1).max(120),
+  amount: z.number().int().positive().max(100000000),
+  note: z.string().max(500).default(''),
+  date: z.string().max(120),
+});
+
+export const RunSheetItemSchema = z.object({
+  id: z.string().max(120).optional(),
+  time: z.string().min(1).max(20),
+  title: z.string().min(1).max(180),
+  owner: z.string().min(1).max(120),
+});
+
 export const EventPlanSchema = z.object({
   id: z.string().max(120).optional(),
   title: z.string().min(1).max(120),
@@ -73,12 +119,16 @@ export const EventPlanSchema = z.object({
   total_budget: z.number().min(10000).max(100000000),
   city: z.string().max(120),
   theme: z.string().max(120),
+  host_names: z.string().max(200).optional(),
+  event_days: z.array(EventDaySchema).max(10).optional(),
   budget: z.array(BudgetItemSchema).min(2).max(12),
   timeline: z.array(TimelineTaskSchema).max(30),
   vendors: z.array(VendorRequirementSchema).max(12),
   ideas: z.array(IdeaItemSchema).max(20),
   risks: z.array(RiskItemSchema).min(3).max(6),
   guest_list: z.array(GuestSchema).max(5000).optional(),
+  payments: z.array(PaymentRecordSchema).default([]).optional(),
+  runSheet: z.array(RunSheetItemSchema).max(30).default([]).optional(),
   clarifying_question: z.string().max(1000).nullable().optional(),
   timestamp: z.number().optional(),
 });
@@ -91,12 +141,15 @@ export const CorePlanSchema = z.object({
   total_budget: z.number().min(10000).max(100000000),
   city: z.string().max(120),
   theme: z.string().max(120),
+  host_names: z.string().max(200).optional(),
+  event_days: z.array(EventDaySchema).max(10).optional(),
   budget: z.array(BudgetItemSchema).min(2).max(12),
   clarifying_question: z.string().max(1000).nullable().optional(),
 });
 
 export const TimelineSectionSchema = z.object({
   timeline: z.array(TimelineTaskSchema).max(30),
+  runSheet: z.array(RunSheetItemSchema).max(30).optional(),
 });
 
 export const VendorsSectionSchema = z.object({
@@ -111,6 +164,8 @@ export const RisksSectionSchema = z.object({
   risks: z.array(RiskItemSchema).min(3).max(6),
 });
 
+export const eventDaySchema = EventDaySchema;
+export const vendorQuoteSchema = VendorQuoteSchema;
 export const budgetItemSchema = BudgetItemSchema;
 export const timelineTaskSchema = TimelineTaskSchema;
 export const vendorRequirementSchema = VendorRequirementSchema;
@@ -174,6 +229,38 @@ const enumValue = <T extends string>(value: unknown, allowed: readonly T[], fall
 const asObject = (value: unknown): Record<string, unknown> =>
   value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 
+const sanitizeDays = (value: unknown): EventDay[] =>
+  (Array.isArray(value) ? value : []).slice(0, 10).map((item) => {
+    const s = asObject(item);
+    return {
+      id: capText(s.id, 120, `day-${clamp(s.day_number, 1, 10, 1)}`),
+      day_number: clamp(s.day_number, 1, 10, 1),
+      title: capText(s.title, 120),
+      date: s.date === undefined ? undefined : capText(s.date, 120),
+      time_slot: s.time_slot === undefined ? undefined : capText(s.time_slot, 120),
+      venue: s.venue === undefined ? undefined : capText(s.venue, 120),
+      budget_allocated: s.budget_allocated === undefined ? undefined : clamp(s.budget_allocated, 0, 100000000, 0),
+      dress_code: s.dress_code === undefined ? undefined : capText(s.dress_code, 120),
+      notes: s.notes === undefined ? undefined : capText(s.notes, 500),
+    };
+  }).filter((d) => d.title.length > 0 && EventDaySchema.safeParse(d).success);
+
+const sanitizeQuotes = (value: unknown): VendorQuote[] =>
+  (Array.isArray(value) ? value : []).slice(0, 15).map((item, index) => {
+    const s = asObject(item);
+    return {
+      id: capText(s.id, 120, `quote-${Date.now()}-${index}`),
+      vendor_name: capText(s.vendor_name, 120),
+      contact_person: s.contact_person === undefined ? undefined : capText(s.contact_person, 120),
+      phone_or_email: s.phone_or_email === undefined ? undefined : capText(s.phone_or_email, 120),
+      quote_amount: clamp(s.quote_amount, 0, 100000000, 0),
+      inclusions: (Array.isArray(s.inclusions) ? s.inclusions : []).slice(0, 10).map((inc) => capText(inc, 250)).filter(Boolean),
+      status: enumValue(s.status, ['received', 'shortlisted', 'selected', 'rejected'] as const, 'received'),
+      rating: s.rating === undefined ? undefined : clamp(s.rating, 1, 5, 5),
+      notes: s.notes === undefined ? undefined : capText(s.notes, 500),
+    };
+  }).filter((q) => q.vendor_name.length > 0 && VendorQuoteSchema.safeParse(q).success);
+
 const sanitizeBudget = (value: unknown): BudgetItem[] => {
   const items = Array.isArray(value) ? value.slice(0, 12).map((item) => {
     const source = asObject(item);
@@ -183,6 +270,7 @@ const sanitizeBudget = (value: unknown): BudgetItem[] => {
       locked: source.locked === true,
       amount: source.amount === undefined ? undefined : clamp(source.amount, 0, 100000000, 0),
       spent: clamp(source.spent, 0, 100000000, 0),
+      day_number: source.day_number === undefined ? undefined : clamp(source.day_number, 1, 10, 1),
     };
   }) : [];
   return items.filter((item) => item.category.length > 0).filter((item) => BudgetItemSchema.safeParse(item).success);
@@ -199,6 +287,8 @@ const sanitizeTimeline = (value: unknown): TimelineTask[] =>
       id: source.id === undefined ? undefined : capText(source.id, 120),
       target_date: source.target_date === undefined ? undefined : capText(source.target_date, 120),
       is_overdue: source.is_overdue === true,
+      day_number: source.day_number === undefined ? undefined : clamp(source.day_number, 1, 10, 1),
+      time_slot: source.time_slot === undefined ? undefined : capText(source.time_slot, 120),
     };
   }).filter((item) => TimelineTaskSchema.safeParse(item).success);
 
@@ -217,6 +307,7 @@ const sanitizeVendors = (value: unknown): VendorRequirement[] =>
       status: enumValue(source.status, ['todo', 'contacted', 'shortlisted', 'booked'] as const, 'todo'),
       quote: source.quote === undefined ? undefined : clamp(source.quote, 0, 100000000, 0),
       notes: source.notes === undefined ? undefined : capText(source.notes, 1000),
+      quotes: sanitizeQuotes(source.quotes),
     };
   }).filter((item) => VendorRequirementSchema.safeParse(item).success);
 
@@ -229,6 +320,9 @@ const sanitizeIdeas = (value: unknown): IdeaItem[] =>
       title: capText(source.title, 120),
       description: capText(source.description, 1000),
       favorited: source.favorited === true,
+      image_url: source.image_url === undefined ? undefined : capText(source.image_url, 250000),
+      image_prompt: source.image_prompt === undefined ? undefined : capText(source.image_prompt, 1000),
+      image_source: source.image_source === undefined ? undefined : enumValue(source.image_source, ['imagen', 'curated', 'custom'] as const, 'curated'),
     };
   }).filter((item) => IdeaItemSchema.safeParse(item).success);
 
@@ -262,6 +356,29 @@ const sanitizeGuests = (value: unknown): Guest[] =>
       plus_ones: clamp(source.plus_ones, 0, 10, 0),
     };
   }).filter((item) => GuestSchema.safeParse(item).success);
+
+const sanitizePayments = (value: unknown): PaymentRecord[] =>
+  (Array.isArray(value) ? value : []).slice(0, 100).map((item, index) => {
+    const s = asObject(item);
+    return {
+      id: capText(s.id, 120, `pay-${Date.now()}-${index}`),
+      category: capText(s.category, 120),
+      amount: clamp(s.amount, 1, 100000000, 1),
+      note: capText(s.note ?? '', 500),
+      date: capText(s.date, 120, new Date().toISOString().slice(0, 10)),
+    };
+  }).filter((p) => p.category.length > 0 && PaymentRecordSchema.safeParse(p).success);
+
+const sanitizeRunSheet = (value: unknown): RunSheetItem[] =>
+  (Array.isArray(value) ? value : []).slice(0, 30).map((item) => {
+    const s = asObject(item);
+    return {
+      id: s.id === undefined ? undefined : capText(s.id, 120),
+      time: capText(s.time, 20, '12:00'),
+      title: capText(s.title, 180),
+      owner: capText(s.owner, 120),
+    };
+  }).filter((r) => r.title.length > 0 && RunSheetItemSchema.safeParse(r).success);
 
 const DEFAULT_RISKS: RiskItem[] = [
   { id: 'weather-buffer', title: 'Weather disruption', category: 'weather', likelihood: 'medium', impact: 'high', mitigation: 'Confirm weather monitoring and shelter 7 days before the event.', backup_plan: 'Move activities indoors or under a covered setup.' },
@@ -306,6 +423,8 @@ export function sanitizeDraft(raw: unknown, fallback?: EventPlan): EventPlan {
     total_budget: clamp(source.total_budget, 10000, 100000000, base.total_budget),
     city: capText(source.city, 120, base.city),
     theme: capText(source.theme, 120, base.theme),
+    host_names: source.host_names === undefined ? base.host_names : capText(source.host_names, 200),
+    event_days: source.event_days === undefined ? base.event_days : sanitizeDays(source.event_days),
     budget: safeBudget,
     timeline: sanitizeTimeline(source.timeline),
     vendors: sanitizeVendors(source.vendors),
@@ -314,6 +433,8 @@ export function sanitizeDraft(raw: unknown, fallback?: EventPlan): EventPlan {
     guest_list: source.guest_list === undefined
       ? base.guest_list
       : sanitizeGuests(source.guest_list),
+    payments: sanitizePayments(source.payments),
+    runSheet: sanitizeRunSheet(source.runSheet ?? source.run_sheet),
     clarifying_question: source.clarifying_question == null ? null : capText(source.clarifying_question, 1000),
   };
   const result = EventPlanSchema.safeParse(candidate);
@@ -386,13 +507,19 @@ export const PlanPatchSchema = z.object({
 });
 
 export const planPatchSchema = PlanPatchSchema;
+export const paymentRecordSchema = PaymentRecordSchema;
+export const runSheetItemSchema = RunSheetItemSchema;
 
+export type EventDay = z.infer<typeof eventDaySchema>;
+export type VendorQuote = z.infer<typeof vendorQuoteSchema>;
 export type BudgetItem = z.infer<typeof budgetItemSchema>;
 export type TimelineTask = z.infer<typeof timelineTaskSchema>;
 export type VendorRequirement = z.infer<typeof vendorRequirementSchema>;
 export type IdeaItem = z.infer<typeof ideaItemSchema>;
 export type RiskItem = z.infer<typeof riskItemSchema>;
 export type Guest = z.infer<typeof guestSchema>;
+export type PaymentRecord = z.infer<typeof PaymentRecordSchema>;
+export type RunSheetItem = z.infer<typeof RunSheetItemSchema>;
 export type EventPlan = z.infer<typeof eventPlanSchema>;
 export type PlanRequest = z.infer<typeof planRequestSchema>;
 export type ReplanRequest = z.infer<typeof replanRequestSchema>;

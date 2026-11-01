@@ -55,6 +55,7 @@ export const AddIdeaSchema = z.object({
   category: category,
   title: taskTitle,
   description: z.string().trim().min(1).max(1000),
+  image_url: z.string().max(250000).optional(),
 });
 
 export const SetGuestsSchema = z.object({
@@ -67,9 +68,18 @@ export const SetBudgetSchema = z.object({
   total_budget: z.number().int().min(10000).max(100000000),
 });
 
+export const LogPaymentSchema = z.object({
+  op: z.literal('logPayment'),
+  category,
+  amount: money,
+  note: z.string().max(500).default(''),
+  date: z.string().max(120).optional(),
+});
+
 export const PlanChangeSchema = z.discriminatedUnion('op', [
   MoveBudgetSchema,
   LogSpendSchema,
+  LogPaymentSchema,
   AddTaskSchema,
   ToggleTaskSchema,
   AddVendorSchema,
@@ -80,22 +90,42 @@ export const PlanChangeSchema = z.discriminatedUnion('op', [
 ]);
 
 export const ChatTurnSchema = z.object({
-  role: z.enum(['user', 'model']),
-  content: z.string().max(1000),
+  id: z.string().max(120).optional(),
+  role: z.enum(['user', 'model', 'assistant']),
+  content: z.string().max(2000),
+  timestamp: z.number().optional(),
+  proposals: z.array(z.any()).optional(),
 });
 
 export const ChatRequestSchema = z.object({
   message: z.string().trim().min(1).max(300),
   plan: EventPlanSchema,
-  history: z.array(ChatTurnSchema).max(6).default([]),
+  history: z.array(ChatTurnSchema).max(30).default([]),
+  context_summary: z.string().max(2000).optional(),
+});
+
+export const ImageGenerationRequestSchema = z.object({
+  prompt: z.string().trim().min(2).max(1000),
+  theme: z.string().max(120).optional(),
+  category: z.string().max(120).optional(),
+  aspectRatio: z.enum(['1:1', '4:3', '16:9']).default('4:3'),
+});
+
+export const TTSRequestSchema = z.object({
+  text: z.string().trim().min(1).max(2000),
+  language: z.enum(['en', 'hi', 'te', 'bn']).default('en'),
 });
 
 export const planChangeSchema = PlanChangeSchema;
 export const chatRequestSchema = ChatRequestSchema;
+export const imageGenerationRequestSchema = ImageGenerationRequestSchema;
+export const ttsRequestSchema = TTSRequestSchema;
 
 export type PlanChange = z.infer<typeof PlanChangeSchema>;
 export type ChatTurn = z.infer<typeof ChatTurnSchema>;
 export type ChatRequest = z.infer<typeof ChatRequestSchema>;
+export type ImageGenerationRequest = z.infer<typeof ImageGenerationRequestSchema>;
+export type TTSRequest = z.infer<typeof TTSRequestSchema>;
 
 export const geminiPlanChangeSchemas = {
   moveBudget: toGeminiSchema(MoveBudgetSchema),

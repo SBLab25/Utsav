@@ -28,9 +28,13 @@ import {
 import {
   chatRequestSchema,
   planChangeSchema,
+  imageGenerationRequestSchema,
+  ttsRequestSchema,
   type PlanChange,
 } from '../../src/schemas/changes.ts';
 import { sanitizeUserText } from '../../src/utils/security.ts';
+import { optimizeChatMemory } from '../chatMemory.ts';
+import { generateDecorImage } from '../imagen.ts';
 import {
   getGenAIClient,
   callGeminiAndValidate,
@@ -102,47 +106,18 @@ router.post('/translate', rateLimit({
         return res.status(400).json({ error: 'Invalid chat request' });
       }
 
-      const { message, plan, history } = parsed.data;
+      const { message, plan, history, context_summary } = parsed.data;
       const ai = getGenAIClient();
       if (!ai) {
         return res.json({
           reply: 'I can suggest changes when Gemini is connected. Your current plan is unchanged.',
           proposals: [],
+          memorySummary: context_summary || '',
         });
       }
 
       const escapeData = (value: string) => value.replace(/</g, '\\u003c');
-      const historyBlock = JSON.stringify(history).replace(/</g, '\\u003c');
-      const plannerContext = {
-        title: plan.title,
-        event_type: plan.event_type,
-        event_date: plan.event_date,
-        guests: plan.guests,
-        total_budget: plan.total_budget,
-        city: plan.city,
-        theme: plan.theme,
-        budget: plan.budget.map((item) => ({
-          category: item.category,
-          amount: item.amount,
-          pct: item.pct,
-          locked: item.locked,
-          spent: item.spent,
-        })),
-        timeline: plan.timeline.map((task) => ({
-          title: task.title,
-          owner: task.owner,
-          t_minus_days: task.t_minus_days,
-          done: task.done,
-        })),
-        vendors: plan.vendors.map((vendor) => ({
-          type: vendor.type,
-          status: vendor.status,
-          quote: vendor.quote,
-          est_low: vendor.est_low,
-          est_high: vendor.est_high,
-        })),
-        ideas: plan.ideas.map((idea) => ({ category: idea.category, title: idea.title })),
-      };
+      const { historyBlock, memorySummary, plannerContext } = optimizeChatMemory(history, plan, context_summary);
       const dataBlock = [
         '<CHAT_HISTORY_DATA>',
         historyBlock,
@@ -210,12 +185,70 @@ router.post('/translate', rateLimit({
           : proposals.length > 0
             ? `I found ${proposals.length} suggested change${proposals.length === 1 ? '' : 's'} for your review.`
             : 'I could not find a safe change to propose from that request.';
-        return res.json({ reply, proposals });
+        return res.json({ reply, proposals, memorySummary });
       } catch (error) {
         console.error('Co-planner request failed:', error);
         return res.status(502).json({ error: 'Co-planner unavailable' });
       }
     });
+
+// Decor Theme Image Generation endpoint (Imagen 3 with curated SVG fallback)
+router.post('/generate-image', rateLimit({
+  windowMs: 60 * 1000,
+  limit: 20,
+  standardHeaders: false,
+  legacyHeaders: false,
+  skip: () => process.env.NODE_ENV === 'test',
+  message: { error: 'Please wait before generating more concept visuals' },
+}), async (req, res) => {
+  const parsed = imageGenerationRequestSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: 'Invalid image generation request' });
+  }
+
+  const { prompt, theme = 'Celebration', category = 'decor', aspectRatio = '4:3' } = parsed.data;
+  const ai = getGenAIClient();
+
+  try {
+    const result = await generateDecorImage(ai, { prompt, theme, category, aspectRatio });
+    return res.json(result);
+  } catch (error) {
+    console.error('Image generation route error:', error);
+    return res.status(500).json({ error: 'Failed to generate concept visual' });
+  }
+});
+
+// Voice TTS Metadata and Preparation endpoint
+router.post('/tts', rateLimit({
+  windowMs: 60 * 1000,
+  limit: 60,
+  standardHeaders: false,
+  legacyHeaders: false,
+  skip: () => process.env.NODE_ENV === 'test',
+}), async (req, res) => {
+  const parsed = ttsRequestSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: 'Invalid TTS request payload' });
+  }
+
+  const { text, language = 'en' } = parsed.data;
+  const clean = text
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/_([^_]+)_/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/^[\s*•-]+\s+/gm, '')
+    .trim();
+
+  return res.json({
+    text: clean,
+    language,
+    voiceHint: language === 'hi' ? 'hi-IN' : language === 'te' ? 'te-IN' : language === 'bn' ? 'bn-IN' : 'en-IN',
+    status: 'ready',
+  });
+});
 
 // Health check endpoint
 router.get('/health', (_req, res) => {

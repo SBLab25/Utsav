@@ -3,11 +3,29 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
-import { AlertCircle, Bot, Check, CheckCircle2, Send, Sparkles, UserRound, X } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import {
+  AlertCircle,
+  Bot,
+  Check,
+  CheckCircle2,
+  Send,
+  Sparkles,
+  UserRound,
+  X,
+  Volume2,
+  VolumeX,
+  Trash2,
+  Brain,
+} from 'lucide-react';
 import type { EventPlan } from '../types/plan.ts';
 import type { PlanChange } from '../schemas/changes.ts';
 import { applyChange, formatINR } from '../utils/planLogic.ts';
+import {
+  speakText,
+  stopSpeech,
+  isSpeechSynthesisSupported,
+} from '../utils/speechSynthesis.ts';
 
 interface ChatMessage {
   id: string;
@@ -35,6 +53,7 @@ function summary(change: PlanChange): string {
   switch (change.op) {
     case 'moveBudget': return `Move ${formatINR(change.amount)} from ${change.from} to ${change.to}`;
     case 'logSpend': return `Log ${formatINR(change.amount)} spent in ${change.category}`;
+    case 'logPayment': return `Log payment of ${formatINR(change.amount)} for ${change.category}${change.note ? ` (${change.note})` : ''}`;
     case 'addTask': return `Add "${change.title}" at T-${change.t_minus_days} days`;
     case 'toggleTask': return `Toggle "${change.title}"`;
     case 'addVendor': return `Add ${change.type} vendor (${formatINR(change.est_low)}–${formatINR(change.est_high)})`;
@@ -136,9 +155,78 @@ function preview(plan: EventPlan, change: PlanChange): { before: string; after: 
 
 export const CoPlannerPanel: React.FC<CoPlannerPanelProps> = ({ plan, onApply }) => {
   const [input, setInput] = useState('');
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('utsav_coplanner_messages');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) return parsed;
+        }
+      } catch (_e) {}
+    }
+    return [];
+  });
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [playingMessageId, setPlayingMessageId] = useState<string | null>(null);
+  const [autoSpeak, setAutoSpeak] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('utsav_coplanner_autospeak') === 'true';
+    }
+    return false;
+  });
+  const [memorySummary, setMemorySummary] = useState<string>('');
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('utsav_coplanner_messages', JSON.stringify(messages));
+      } catch (_e) {}
+    }
+  }, [messages]);
+
+  useEffect(() => {
+    return () => {
+      stopSpeech();
+    };
+  }, []);
+
+  const handleToggleSpeak = (messageId: string, text: string) => {
+    if (playingMessageId === messageId) {
+      stopSpeech();
+      setPlayingMessageId(null);
+    } else {
+      setPlayingMessageId(messageId);
+      speakText(text, {
+        onStart: () => setPlayingMessageId(messageId),
+        onEnd: () => setPlayingMessageId(null),
+        onError: () => setPlayingMessageId(null),
+      });
+    }
+  };
+
+  const handleToggleAutoSpeak = () => {
+    const nextVal = !autoSpeak;
+    setAutoSpeak(nextVal);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('utsav_coplanner_autospeak', String(nextVal));
+    }
+    if (!nextVal) {
+      stopSpeech();
+      setPlayingMessageId(null);
+    }
+  };
+
+  const handleClearChat = () => {
+    stopSpeech();
+    setPlayingMessageId(null);
+    setMessages([]);
+    setMemorySummary('');
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('utsav_coplanner_messages');
+    }
+  };
 
   const send = async (value = input) => {
     const message = value.trim();
@@ -146,28 +234,47 @@ export const CoPlannerPanel: React.FC<CoPlannerPanelProps> = ({ plan, onApply })
     setInput('');
     setError(null);
     setPending(true);
+    stopSpeech();
+    setPlayingMessageId(null);
+
     const userMessage: ChatMessage = { id: `${Date.now()}-user`, role: 'user', content: message };
     setMessages((current) => [...current, userMessage]);
     try {
-      const history = [...messages, userMessage].slice(-6).map((item) => ({
+      // Multi-turn context memory optimization: take up to 20 turns + memory summary
+      const history = [...messages, userMessage].slice(-20).map((item) => ({
         role: item.role === 'assistant' ? 'model' as const : 'user' as const,
         content: item.content,
+        proposals: item.proposals?.map((p) => p.change),
       }));
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message, plan, history }),
+        body: JSON.stringify({ message, plan, history, context_summary: memorySummary }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || 'Co-planner unavailable');
+      if (data.memorySummary) {
+        setMemorySummary(data.memorySummary);
+      }
+      const assistantId = `${Date.now()}-assistant`;
+      const replyContent = data.reply || 'Here are some suggestions for your review.';
       setMessages((current) => [...current, {
-        id: `${Date.now()}-assistant`,
+        id: assistantId,
         role: 'assistant',
-        content: data.reply || 'Here are some suggestions for your review.',
+        content: replyContent,
         proposals: Array.isArray(data.proposals)
           ? data.proposals.map((change: PlanChange) => ({ change }))
           : [],
       }]);
+
+      if (autoSpeak) {
+        setPlayingMessageId(assistantId);
+        speakText(replyContent, {
+          onStart: () => setPlayingMessageId(assistantId),
+          onEnd: () => setPlayingMessageId(null),
+          onError: () => setPlayingMessageId(null),
+        });
+      }
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Co-planner unavailable');
     } finally {
@@ -191,14 +298,53 @@ export const CoPlannerPanel: React.FC<CoPlannerPanelProps> = ({ plan, onApply })
   return (
     <section className="flex min-h-[36rem] flex-col overflow-hidden rounded-3xl border border-stone-200/90 bg-white/95 shadow-xs dark:border-stone-800 dark:bg-[#23152C]/95" aria-label="Co-planner chat">
       <header className="border-b border-stone-200/80 px-5 py-4 dark:border-stone-800">
-        <div className="flex items-center gap-3">
-          <span className="relative rounded-2xl bg-[#3B1F4A] p-2.5 text-white dark:bg-[#F5A623] dark:text-stone-950">
-            <Bot className="h-5 w-5" aria-hidden="true" />
-            <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-white bg-emerald-500 dark:border-[#23152C]" aria-hidden="true" />
-          </span>
-          <div className="min-w-0">
-            <h2 className="font-serif text-lg font-bold">Co-planner</h2>
-            <p className="text-xs text-stone-500 dark:text-stone-400">Your event planning assistant</p>
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <span className="relative rounded-2xl bg-[#3B1F4A] p-2.5 text-white dark:bg-[#F5A623] dark:text-stone-950">
+              <Bot className="h-5 w-5" aria-hidden="true" />
+              <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-white bg-emerald-500 dark:border-[#23152C]" aria-hidden="true" />
+            </span>
+            <div className="min-w-0">
+              <h2 className="font-serif text-lg font-bold">Co-planner</h2>
+              <p className="text-xs text-stone-500 dark:text-stone-400">Your event planning assistant</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {messages.length > 0 && (
+              <>
+                <span
+                  className="hidden sm:inline-flex items-center gap-1 rounded-full border border-stone-200/90 bg-stone-100 px-2 py-0.5 text-[10px] font-medium text-stone-600 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-300"
+                  title="Multi-turn context memory active"
+                >
+                  <Brain className="h-3 w-3 text-purple-600 dark:text-purple-400" aria-hidden="true" />
+                  <span>{messages.length} turns</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={handleClearChat}
+                  className="rounded-xl p-1.5 text-stone-400 hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200 transition-colors cursor-pointer"
+                  title="Clear conversation history"
+                  aria-label="Clear conversation history"
+                >
+                  <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                </button>
+              </>
+            )}
+
+            <button
+              type="button"
+              onClick={handleToggleAutoSpeak}
+              className={`rounded-xl p-1.5 transition-colors cursor-pointer ${
+                autoSpeak
+                  ? 'bg-amber-500/20 text-[#B45309] dark:text-[#F5A623]'
+                  : 'text-stone-400 hover:bg-stone-100 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-stone-200'
+              }`}
+              title={autoSpeak ? 'Voice readout is ON (Click to mute)' : 'Voice readout is OFF (Click to enable auto-speak)'}
+              aria-label={autoSpeak ? 'Disable voice readout' : 'Enable voice readout'}
+            >
+              {autoSpeak ? <Volume2 className="h-4 w-4" aria-hidden="true" /> : <VolumeX className="h-4 w-4" aria-hidden="true" />}
+            </button>
           </div>
         </div>
         <div className="mt-3 flex items-center gap-2 text-[11px] text-stone-500 dark:text-stone-400">
@@ -236,8 +382,35 @@ export const CoPlannerPanel: React.FC<CoPlannerPanelProps> = ({ plan, onApply })
               </span>
             )}
             <div className={`max-w-[92%] rounded-2xl px-3.5 py-3 ${message.role === 'user' ? 'rounded-br-md bg-[#3B1F4A] text-white dark:bg-[#5B2D70]' : 'rounded-bl-md bg-stone-100 text-stone-700 dark:bg-stone-900/70 dark:text-stone-200'}`}>
-              <div className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide opacity-60">
-                {message.role === 'user' ? <><UserRound className="h-3 w-3" aria-hidden="true" /> You</> : <><Bot className="h-3 w-3" aria-hidden="true" /> Co-planner</>}
+              <div className="mb-1 flex items-center justify-between">
+                <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide opacity-60">
+                  {message.role === 'user' ? <><UserRound className="h-3 w-3" aria-hidden="true" /> You</> : <><Bot className="h-3 w-3" aria-hidden="true" /> Co-planner</>}
+                </div>
+                {message.role === 'assistant' && (
+                  <button
+                    type="button"
+                    onClick={() => handleToggleSpeak(message.id, message.content)}
+                    className={`inline-flex items-center gap-1 rounded-lg px-2 py-0.5 text-[10px] font-medium transition-colors cursor-pointer ${
+                      playingMessageId === message.id
+                        ? 'bg-amber-500/25 text-[#B45309] dark:text-[#F5A623] font-bold'
+                        : 'text-stone-400 hover:text-stone-700 dark:hover:text-stone-200 hover:bg-stone-200/50 dark:hover:bg-stone-800'
+                    }`}
+                    title={playingMessageId === message.id ? 'Stop audio' : 'Listen to response'}
+                    aria-label={playingMessageId === message.id ? 'Stop audio readout' : 'Listen to response'}
+                  >
+                    {playingMessageId === message.id ? (
+                      <>
+                        <VolumeX className="h-3 w-3" aria-hidden="true" />
+                        <span>Stop</span>
+                      </>
+                    ) : (
+                      <>
+                        <Volume2 className="h-3 w-3" aria-hidden="true" />
+                        <span>Listen</span>
+                      </>
+                    )}
+                  </button>
+                )}
               </div>
               {message.role === 'assistant' ? <AssistantText content={message.content} /> : <p className="whitespace-pre-wrap text-sm leading-6">{message.content}</p>}
               {message.proposals && message.proposals.length > 0 && (

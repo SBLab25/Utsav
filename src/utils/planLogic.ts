@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type { BudgetItem, EventPlan, PlanDiff, TimelineTask, PlanPatch } from '../types/plan.ts';
+import type { BudgetItem, EventPlan, PlanDiff, TimelineTask, PlanPatch, EventDay, VendorQuote, VendorRequirement, PaymentRecord, RunSheetItem } from '../types/plan.ts';
 import { eventPlanSchema } from '../schemas/plan.ts';
 import { planChangeSchema, type PlanChange } from '../schemas/changes.ts';
 
@@ -158,6 +158,208 @@ export function recalculateBudgetWithLocked(
 }
 
 /**
+ * Sorts run sheet items strictly by time (HH:MM ascending).
+ */
+export function sortRunSheet(items: RunSheetItem[]): RunSheetItem[] {
+  if (!Array.isArray(items)) return [];
+  return [...items].sort((a, b) => (a.time || '').localeCompare(b.time || ''));
+}
+
+/**
+ * Generates sensible default time-ordered run sheet items for the celebration day.
+ */
+export function generateDefaultRunSheet(eventType?: string): RunSheetItem[] {
+  const type = (eventType || '').toLowerCase();
+  const isSangeet = type.includes('sangeet') || type.includes('dance') || type.includes('music');
+
+  if (isSangeet) {
+    return [
+      { id: 'rs-1', time: '14:00', title: 'AV & Sound Setup with DJ Tech Lead', owner: 'DJ Team' },
+      { id: 'rs-2', time: '16:00', title: 'Lighting & Stage Backdrop Final Check', owner: 'Decorator' },
+      { id: 'rs-3', time: '17:30', title: 'Family Dance Soundcheck & MC Walkthrough', owner: 'Choreographer' },
+      { id: 'rs-4', time: '18:30', title: 'Welcome Drinks & Live Chaat Counter Opens', owner: 'Catering Lead' },
+      { id: 'rs-5', time: '19:30', title: 'Guest Seating & Emcee Welcome Address', owner: 'Emcee' },
+      { id: 'rs-6', time: '20:00', title: 'Family Choreographed Performances & Dance Battles', owner: 'Family Host' },
+      { id: 'rs-7', time: '21:30', title: 'Grand Dinner Buffet Served', owner: 'Head Chef' },
+      { id: 'rs-8', time: '22:30', title: 'Open Dance Floor & Celebration Beats', owner: 'DJ Team' },
+      { id: 'rs-9', time: '23:45', title: 'Wrap-up & Vendor Settlement Sign-off', owner: 'Event Coordinator' },
+    ];
+  }
+
+  return [
+    { id: 'rs-1', time: '08:00', title: 'Vendor Entry & Setup Commences', owner: 'Venue Manager' },
+    { id: 'rs-2', time: '10:00', title: 'Stage, AV & Seating Inspection', owner: 'Event Coordinator' },
+    { id: 'rs-3', time: '11:30', title: 'Core Family & VIP Arrival Briefing', owner: 'Family Host' },
+    { id: 'rs-4', time: '13:00', title: 'Welcome Lunch / Refreshments Service', owner: 'Catering Head' },
+    { id: 'rs-5', time: '16:30', title: 'Final Technical & Audio Checks', owner: 'AV Lead' },
+    { id: 'rs-6', time: '18:00', title: 'Guest Welcome Desk Opens', owner: 'Hospitality Team' },
+    { id: 'rs-7', time: '19:00', title: 'Main Celebration Ceremony & Speeches', owner: 'Emcee' },
+    { id: 'rs-8', time: '20:30', title: 'Dinner Buffet & Live Counters Open', owner: 'Catering Supervisor' },
+    { id: 'rs-9', time: '22:00', title: 'Celebratory Toasts & Cake Cutting', owner: 'Host Family' },
+    { id: 'rs-10', time: '23:00', title: 'Event Concludes & Logistics Teardown', owner: 'Event Coordinator' },
+  ];
+}
+
+/**
+ * Calculates total spent per category by summing payments recorded for that category.
+ */
+export function calculateSpentByCategory(payments: PaymentRecord[] = []): Record<string, number> {
+  const map: Record<string, number> = {};
+  if (!Array.isArray(payments)) return map;
+  for (const p of payments) {
+    if (!p || typeof p.amount !== 'number' || isNaN(p.amount)) continue;
+    const key = (p.category || '').trim().toLowerCase();
+    map[key] = (map[key] || 0) + p.amount;
+  }
+  return map;
+}
+
+/**
+ * Derives each budget item's `spent` field from the plan's payments array.
+ */
+export function deriveBudgetItemSpent(
+  budget: BudgetItem[],
+  payments: PaymentRecord[] = []
+): BudgetItem[] {
+  if (!Array.isArray(budget)) return [];
+  const spentMap = calculateSpentByCategory(payments);
+
+  return budget.map((item) => {
+    const key = (item.category || '').trim().toLowerCase();
+    const paymentsSpent = spentMap[key];
+    const spent = typeof paymentsSpent === 'number' ? paymentsSpent : (item.spent ?? 0);
+    return {
+      ...item,
+      spent,
+    };
+  });
+}
+
+/**
+ * Detects whether a budget category has overrun its planned allocation and by how much.
+ */
+export function getCategoryOverrun(
+  item: BudgetItem,
+  totalBudget: number
+): { isOverrun: boolean; overrunAmount: number } {
+  const planned = item.amount ?? Math.round(((item.pct || 0) / 100) * totalBudget);
+  const spent = item.spent ?? 0;
+  const overrunAmount = Math.max(0, spent - planned);
+  return {
+    isOverrun: overrunAmount > 0,
+    overrunAmount,
+  };
+}
+
+/**
+ * Proposes a rebalance when a category is overrun by moving money from categories with unspent, unlocked budget.
+ * Strictly respects locks (locked categories are never touched).
+ */
+export function proposeRebalanceForOverrun(
+  budget: BudgetItem[],
+  totalBudget: number,
+  overrunCategory: string,
+  overrunAmount: number
+): { proposedBudget: BudgetItem[]; diffs: PlanDiff[] } | null {
+  if (!budget || budget.length === 0 || overrunAmount <= 0) return null;
+
+  const targetIndex = budget.findIndex(
+    (b) => b.category.trim().toLowerCase() === overrunCategory.trim().toLowerCase()
+  );
+  if (targetIndex < 0) return null;
+
+  const target = budget[targetIndex];
+  const targetPlanned = target.amount ?? Math.round(((target.pct || 0) / 100) * totalBudget);
+
+  // Eligible donors:
+  // 1. Not the overrun category itself
+  // 2. Unlocked (item.locked === false)
+  // 3. Have unspent budget: planned > spent
+  const donorsWithSurplus = budget
+    .map((item, index) => {
+      if (index === targetIndex || item.locked) return null;
+      const planned = item.amount ?? Math.round(((item.pct || 0) / 100) * totalBudget);
+      const spent = item.spent ?? 0;
+      const surplus = Math.max(0, planned - spent);
+      return { index, item, planned, spent, surplus };
+    })
+    .filter((d): d is NonNullable<typeof d> => d !== null && d.surplus > 0);
+
+  const totalAvailableSurplus = donorsWithSurplus.reduce((acc, d) => acc + d.surplus, 0);
+  if (totalAvailableSurplus <= 0) {
+    return null; // Cannot rebalance without touching locked or already-spent budget
+  }
+
+  // Amount to move cannot exceed available surplus
+  const amountToMove = Math.min(overrunAmount, totalAvailableSurplus);
+  if (amountToMove <= 0) return null;
+
+  // Clone budget items with initialized amounts
+  const newBudget = budget.map((b) => ({
+    ...b,
+    amount: b.amount ?? Math.round(((b.pct || 0) / 100) * totalBudget),
+  }));
+
+  // Distribute reduction proportionally among eligible donors
+  let remainingToDeduct = amountToMove;
+  const diffs: PlanDiff[] = [];
+
+  for (let i = 0; i < donorsWithSurplus.length; i++) {
+    const donor = donorsWithSurplus[i];
+    const isLast = i === donorsWithSurplus.length - 1;
+    const share = isLast
+      ? remainingToDeduct
+      : Math.min(
+          donor.surplus,
+          Math.round((donor.surplus / totalAvailableSurplus) * amountToMove)
+        );
+
+    const actualDeduction = Math.min(share, remainingToDeduct);
+    remainingToDeduct -= actualDeduction;
+
+    const newAmount = Math.max(donor.spent, (newBudget[donor.index].amount ?? donor.planned) - actualDeduction);
+    newBudget[donor.index].amount = newAmount;
+    newBudget[donor.index].pct = Math.round((newAmount / totalBudget) * 1000) / 10;
+
+    diffs.push({
+      type: 'budget',
+      summary: `Moved ₹${actualDeduction.toLocaleString('en-IN')} from ${donor.item.category}`,
+      badge: `-₹${actualDeduction.toLocaleString('en-IN')}`,
+      changeType: 'modified',
+    });
+  }
+
+  // Increase target category
+  const newTargetAmount = (newBudget[targetIndex].amount ?? targetPlanned) + amountToMove;
+  newBudget[targetIndex].amount = newTargetAmount;
+  newBudget[targetIndex].pct = Math.round((newTargetAmount / totalBudget) * 1000) / 10;
+
+  diffs.unshift({
+    type: 'budget',
+    summary: `Added ₹${amountToMove.toLocaleString('en-IN')} to ${target.category}`,
+    badge: `+₹${amountToMove.toLocaleString('en-IN')}`,
+    changeType: 'modified',
+  });
+
+  // Ensure pct sums to 100 without overriding exact rupee amounts
+  const sumPct = Math.round(newBudget.reduce((acc, it) => acc + (it.pct || 0), 0) * 10) / 10;
+  const pctDiff = Math.round((100 - sumPct) * 10) / 10;
+  if (Math.abs(pctDiff) > 0.001) {
+    const adjustIdx = newBudget.findIndex((b) => !b.locked);
+    const targetAdjust = adjustIdx >= 0 ? adjustIdx : 0;
+    newBudget[targetAdjust] = {
+      ...newBudget[targetAdjust],
+      pct: Math.round((newBudget[targetAdjust].pct + pctDiff) * 10) / 10,
+    };
+  }
+
+  return {
+    proposedBudget: newBudget,
+    diffs,
+  };
+}
+
+/**
  * Adjust an individual category percentage (+/- delta) and distribute the difference across other unlocked items.
  * Enforces sum of percentages === 100%.
  */
@@ -281,12 +483,32 @@ export function applyChange(plan: EventPlan, rawChange: PlanChange): EventPlan {
         return { ...item, amount, pct: (amount / next.total_budget) * 100 };
       });
       next = { ...next, budget: normalizeBudgetPercentages(updated, next.total_budget) };
+    } else if (change.op === 'logPayment') {
+      const currentPayments = Array.isArray(next.payments) ? next.payments : [];
+      const newPayment = {
+        id: `pay-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        category: change.category,
+        amount: change.amount,
+        note: change.note || '',
+        date: change.date || new Date().toISOString().slice(0, 10),
+      };
+      next.payments = [...currentPayments, newPayment];
+      next.budget = deriveBudgetItemSpent(next.budget, next.payments);
     } else if (change.op === 'logSpend') {
       const item = next.budget.find((entry) => sameName(entry.category, change.category));
       if (!item) return plan;
       const allocated = budgetAmount(item, next.total_budget);
       const spent = item.spent || 0;
       if (spent + change.amount > allocated) return plan;
+      const currentPayments = Array.isArray(next.payments) ? next.payments : [];
+      const newPayment = {
+        id: `pay-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        category: item.category,
+        amount: change.amount,
+        note: 'Co-planner logged spend',
+        date: new Date().toISOString().slice(0, 10),
+      };
+      next.payments = [...currentPayments, newPayment];
       next.budget = next.budget.map((entry) =>
         entry === item ? { ...entry, spent: spent + change.amount, amount: allocated } : entry
       );
@@ -330,6 +552,7 @@ export function applyChange(plan: EventPlan, rawChange: PlanChange): EventPlan {
         category: change.category,
         title: change.title,
         description: change.description,
+        ...(change.image_url ? { image_url: change.image_url } : {}),
       }];
     } else if (change.op === 'setGuests') {
       next.guests = change.guests;
@@ -676,6 +899,13 @@ export function generateWhatsAppSummary(plan: EventPlan): string {
     .map((risk) => `• ${risk.title} — ${risk.likelihood} likelihood / ${risk.impact} impact\n  Mitigation: ${risk.mitigation}\n  Backup: ${risk.backup_plan}`)
     .join('\n');
 
+  const runSheetStr = Array.isArray(plan.runSheet) && plan.runSheet.length > 0
+    ? `\n\n📋 *Day-of Run Sheet:*\n` + plan.runSheet
+        .slice(0, 10)
+        .map((r) => `• ${r.time} — ${r.title} (${r.owner})`)
+        .join('\n')
+    : '';
+
   return `🎉 *${plan.title.toUpperCase()}*
 📍 City: ${plan.city} | 👥 Guests: ${plan.guests}
 📅 Date: ${plan.event_date} | ✨ Theme: ${plan.theme}
@@ -688,7 +918,7 @@ ${categoriesStr}
 ${milestonesStr}
 
 🛡️ *Risk Radar:*
-${risksStr}
+${risksStr}${runSheetStr}
 
 _Generated with Utsav - AI Celebration & Event Planner_`;
 }
@@ -986,4 +1216,79 @@ export function computeDiffsFromPatch(oldPlan: EventPlan, patch: PlanPatch): Pla
   }
 
   return diffs;
+}
+
+/**
+ * Filter timeline tasks by day number ('all', 'pre', or 1, 2, 3...)
+ */
+export function filterTasksByDay(
+  tasks: TimelineTask[],
+  filter: number | 'all' | 'pre'
+): TimelineTask[] {
+  if (filter === 'all') return tasks;
+  if (filter === 'pre') return tasks.filter((t) => t.t_minus_days > 0 && !t.day_number);
+  return tasks.filter((t) => t.day_number === filter || (t.t_minus_days === 0 && !t.day_number && filter === 1));
+}
+
+/**
+ * Computes day-wise budget allocation from event days and budget items
+ */
+export function calculateDayWiseBudget(plan: EventPlan): Array<{
+  day_number: number;
+  title: string;
+  allocated: number;
+  items: BudgetItem[];
+  pctOfTotal: number;
+}> {
+  const days = plan.event_days || [];
+  if (days.length === 0) return [];
+
+  return days.map((d) => {
+    const dayItems = plan.budget.filter((b) => b.day_number === d.day_number);
+    const dayTotalFromItems = dayItems.reduce((acc, it) => acc + (it.amount || Math.round((it.pct / 100) * plan.total_budget)), 0);
+    const allocated = d.budget_allocated || dayTotalFromItems;
+    const pctOfTotal = plan.total_budget > 0 ? Math.round((allocated / plan.total_budget) * 100) : 0;
+    return {
+      day_number: d.day_number,
+      title: d.title,
+      allocated,
+      items: dayItems,
+      pctOfTotal,
+    };
+  });
+}
+
+/**
+ * Computes summary statistics for a vendor category's quotes
+ */
+export function calculateQuoteStats(vendor: VendorRequirement): {
+  minQuote: number;
+  maxQuote: number;
+  avgQuote: number;
+  quoteCount: number;
+  selectedQuote?: VendorQuote;
+} {
+  const quotes: VendorQuote[] = vendor.quotes || [];
+  if (quotes.length === 0) {
+    return {
+      minQuote: 0,
+      maxQuote: 0,
+      avgQuote: 0,
+      quoteCount: 0,
+    };
+  }
+  const amounts = quotes.map((q: VendorQuote) => q.quote_amount);
+  const minQuote = Math.min(...amounts);
+  const maxQuote = Math.max(...amounts);
+  const sum = amounts.reduce((acc: number, curr: number) => acc + curr, 0);
+  const avgQuote = Math.round(sum / amounts.length);
+  const selectedQuote = quotes.find((q: VendorQuote) => q.status === 'selected');
+
+  return {
+    minQuote,
+    maxQuote,
+    avgQuote,
+    quoteCount: quotes.length,
+    selectedQuote,
+  };
 }
