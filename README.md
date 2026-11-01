@@ -139,6 +139,7 @@ Edit `.env` with at least one provider key:
 GEMINI_API_KEY="your-gemini-api-key"
 # Or:
 GROQ_API_KEY="your-groq-api-key"
+AI_PROVIDER="auto"
 PORT=3000
 ```
 
@@ -163,6 +164,7 @@ npm start
 | `GEMINI_API_KEY` | Optional Google Gemini API key; tried first when both are configured | None | No |
 | `GEMINI_MODEL` | Gemini model identifier | `gemini-2.5-flash` | No |
 | `GROQ_API_KEY` | Optional Groq API key; used directly or as Gemini fallback | None | No |
+| `AI_PROVIDER` | Provider preference: `auto`, `gemini`, or `groq` | `auto` | No |
 | `GROQ_MODEL` | Groq model identifier | `llama-3.3-70b-versatile` | No |
 | `GEMINI_TIMEOUT_MS` | Gemini request timeout in milliseconds | `25000` (25s) | No |
 | `PORT` | HTTP server port | `3000` | No |
@@ -252,7 +254,7 @@ curl http://localhost:3000/api/health
 ## Known Limitations
 
 - **Speech Recognition Support**: Voice input uses the Web Speech API (`webkitSpeechRecognition`), supported primarily in Chromium-based browsers (Chrome, Edge) and Safari. Fallback to standard text input is always available.
-- **Provider fallback**: Utsav tries Gemini first when configured, retries with Groq when the Google request fails, and uses the deterministic rule-based planner when neither provider is configured or both fail. Complex, highly nuanced requests are best served with an active provider connection.
+- **Provider fallback**: Utsav tries Gemini first in `auto` mode, retries with Groq when Google fails or returns unusable output, and uses the deterministic rule-based planner when neither provider is configured or both fail. Set `AI_PROVIDER="groq"` to bypass Gemini when its service or key is unavailable. Complex, highly nuanced requests are best served with an active provider connection.
 - **Currency Default**: Default calculations and parsing are optimized for Indian Rupees (INR, Lakhs, Crores).
 
 ---

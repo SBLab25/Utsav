@@ -19,6 +19,7 @@ import {
 export const GEMINI_TIMEOUT_MS = parseInt(process.env.GEMINI_TIMEOUT_MS || '25000', 10);
 export const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 export const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
+export const AI_PROVIDER = process.env.AI_PROVIDER || 'auto';
 const PROVIDER_TIMEOUT_MS = parseInt(process.env.AI_PROVIDER_TIMEOUT_MS || '8000', 10);
 const GROQ_ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
 
@@ -158,32 +159,48 @@ function createProviderClient(geminiKey: string | undefined, groqKey: string | u
     ...(gemini ? [{ name: 'gemini', client: gemini }] : []),
     ...(groq ? [{ name: 'groq', client: groq }] : []),
   ];
+  if (AI_PROVIDER === 'groq') {
+    providers.sort((a, b) => (a.name === 'groq' ? -1 : b.name === 'groq' ? 1 : 0));
+  } else if (AI_PROVIDER === 'gemini') {
+    providers.sort((a, b) => (a.name === 'gemini' ? -1 : b.name === 'gemini' ? 1 : 0));
+  }
   if (providers.length === 0) return null;
+  let preferredIndex = 0;
+  let activeProvider = providers[0].name;
+  const generateContent = async (options: GenerateContentOptions, startIndex = preferredIndex) => {
+    let lastError: unknown;
+    for (let index = startIndex; index < providers.length; index += 1) {
+      const provider = providers[index];
+      try {
+        const providerCall = (provider.client as any).models.generateContent({
+          ...options,
+          model: provider.name === 'groq' ? GROQ_MODEL : options.model || GEMINI_MODEL,
+        });
+        let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+        const timeout = new Promise<never>((_, reject) => {
+          timeoutHandle = setTimeout(() => reject(new Error(`${provider.name} provider timed out`)), PROVIDER_TIMEOUT_MS);
+        });
+        const result = await Promise.race([providerCall, timeout]).finally(() => {
+          if (timeoutHandle) clearTimeout(timeoutHandle);
+        });
+        activeProvider = provider.name;
+        preferredIndex = 0;
+        return result;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error('No AI provider available');
+  };
   return {
-    provider: providers[0].name,
+    get provider() {
+      return activeProvider;
+    },
+    preferFallback() {
+      preferredIndex = Math.min(1, providers.length - 1);
+    },
     models: {
-      generateContent: async (options: GenerateContentOptions) => {
-        let lastError: unknown;
-        for (const provider of providers) {
-          try {
-            const providerCall = (provider.client as any).models.generateContent({
-              ...options,
-              model: provider.name === 'groq' ? GROQ_MODEL : options.model || GEMINI_MODEL,
-            });
-            let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-            const timeout = new Promise<never>((_, reject) => {
-              timeoutHandle = setTimeout(() => reject(new Error(`${provider.name} provider timed out`)), PROVIDER_TIMEOUT_MS);
-            });
-            const result = await Promise.race([providerCall, timeout]).finally(() => {
-              if (timeoutHandle) clearTimeout(timeoutHandle);
-            });
-            return result;
-          } catch (error) {
-            lastError = error;
-          }
-        }
-        throw lastError instanceof Error ? lastError : new Error('No AI provider available');
-      },
+      generateContent: (options: GenerateContentOptions) => generateContent(options),
     },
   };
 }

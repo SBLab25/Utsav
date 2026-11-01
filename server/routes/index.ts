@@ -37,6 +37,7 @@ import {
   callGeminiPatchAndValidate,
   callGeminiSectionAndValidate,
   GEMINI_MODEL,
+  GROQ_MODEL,
 } from '../gemini.ts';
 import {
   getIntakePrompt,
@@ -455,7 +456,9 @@ router.post('/plan', async (req, res) => {
     const prompt = getIntakePrompt(sanitizedBrief, language as ContentLanguage);
 
     const timeoutMs = parseInt(process.env.GEMINI_TIMEOUT_MS || '25000', 10);
-    const activeModel = process.env.GEMINI_MODEL || GEMINI_MODEL;
+    const activeModel = ai.provider === 'groq'
+      ? (process.env.GROQ_MODEL || GROQ_MODEL)
+      : (process.env.GEMINI_MODEL || GEMINI_MODEL);
     let result = await callGeminiAndValidate(ai, prompt, timeoutMs, getSystemInstruction(language as ContentLanguage));
 
     if (!result.success && result.reason === 'timeout') {
@@ -464,11 +467,12 @@ router.post('/plan', async (req, res) => {
     }
 
     if (!result.success) {
+      ai.preferFallback?.();
       result = await callGeminiAndValidate(ai, prompt, timeoutMs, getSystemInstruction(language as ContentLanguage));
     }
 
     if (result.success) {
-      return res.json({ plan: result.plan, model: activeModel, source: 'gemini' });
+      return res.json({ plan: result.plan, model: ai.provider === 'groq' ? (process.env.GROQ_MODEL || GROQ_MODEL) : activeModel, source: ai.provider || 'gemini' });
     }
 
     const plan = generateDefaultPlan(brief);
@@ -500,7 +504,9 @@ router.post('/replan', async (req, res) => {
 
     const sanitizedInstruction = sanitizeUserText(changeInstruction);
     const timeoutMs = parseInt(process.env.GEMINI_TIMEOUT_MS || '25000', 10);
-    const activeModel = process.env.GEMINI_MODEL || GEMINI_MODEL;
+    const activeModel = ai.provider === 'groq'
+      ? (process.env.GROQ_MODEL || GROQ_MODEL)
+      : (process.env.GEMINI_MODEL || GEMINI_MODEL);
 
     // Reduce payload size by sending only the fields Gemini needs
     const concisePlan = createConcisePlanForReplan(currentPlan);
@@ -518,8 +524,8 @@ router.post('/replan', async (req, res) => {
           return res.json({
             plan: planCheck.data,
             patch: patchResult.patch,
-            model: activeModel,
-            source: 'gemini',
+            model: ai.provider === 'groq' ? (process.env.GROQ_MODEL || GROQ_MODEL) : activeModel,
+            source: ai.provider || 'gemini',
           });
         }
       } catch (_patchErr) {
@@ -542,11 +548,12 @@ router.post('/replan', async (req, res) => {
     }
 
     if (!fullResult.success) {
+      ai.preferFallback?.();
       fullResult = await callGeminiAndValidate(ai, fullPlanPrompt, timeoutMs, getSystemInstruction(language as ContentLanguage));
     }
 
     if (fullResult.success) {
-      return res.json({ plan: fullResult.plan, model: activeModel, source: 'gemini' });
+      return res.json({ plan: fullResult.plan, model: ai.provider === 'groq' ? (process.env.GROQ_MODEL || GROQ_MODEL) : activeModel, source: ai.provider || 'gemini' });
     }
 
     // 3. Final fallback: Deterministic smart replan

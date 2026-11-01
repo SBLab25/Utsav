@@ -96,7 +96,7 @@ describe('server/api.test.ts', () => {
         .send({ brief: "Sister's sangeet, 150 guests, ₹6L, 14 Dec, Vizag" });
 
       expect(res.status).toBe(200);
-      expect(res.body.source).toBe('gemini');
+      expect(res.body.source).toBe('groq');
       expect(res.body.plan.title).toBe("Sister's Retro Bollywood Sangeet");
       expect(fetchMock).toHaveBeenCalledWith(
         'https://api.groq.com/openai/v1/chat/completions',
