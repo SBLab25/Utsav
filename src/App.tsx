@@ -15,7 +15,6 @@ import {
   AlertCircle,
   HelpCircle,
   Users,
-  Bot,
 } from 'lucide-react';
 import type {
   EventPlan,
@@ -171,7 +170,7 @@ const INITIAL_SANGEET_PLAN: EventPlan = {
   clarifying_question: null,
 };
 
-type TabType = 'budget' | 'timeline' | 'vendors' | 'ideas' | 'risks' | 'guests' | 'coplanner';
+type TabType = 'budget' | 'timeline' | 'vendors' | 'ideas' | 'risks' | 'guests';
 
 export default function App() {
   const hasSharedHash = typeof window !== 'undefined' && window.location.hash.startsWith('#plan=');
@@ -262,7 +261,7 @@ export default function App() {
   const [showHistoryDrawer, setShowHistoryDrawer] = useState<boolean>(false);
   const [clarifyingAnswer, setClarifyingAnswer] = useState<string>('');
   const [announcement, setAnnouncement] = useState<string>('');
-  const tabList: TabType[] = ['budget', 'timeline', 'vendors', 'ideas', 'risks', 'guests', 'coplanner'];
+  const tabList: TabType[] = ['budget', 'timeline', 'vendors', 'ideas', 'risks', 'guests'];
   const tabRefs = useRef<{ [key: string]: HTMLButtonElement | null }>({});
 
   const handleTabKeyDown = (
@@ -948,7 +947,7 @@ export default function App() {
         {/* 2-Column Responsive Workspace */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
           {/* Left Column: Intake Brief & Re-plan Console */}
-          <div className="lg:col-span-4 space-y-6 no-print">
+          <div className="lg:col-span-3 space-y-6 no-print">
             <BriefInput
               initialBrief={DEFAULT_BRIEF}
               onGeneratePlan={handleGeneratePlan}
@@ -978,7 +977,7 @@ export default function App() {
           </div>
 
           {/* Right Column: Plan Board */}
-          <div className="lg:col-span-8 space-y-6">
+          <div className="lg:col-span-6 space-y-6">
             {isLoading ? (
               <SkeletonLoader />
             ) : !plan ? (
@@ -1192,24 +1191,6 @@ export default function App() {
                       <span>Guests ({plan.guest_list?.length || 0})</span>
                     </button>
 
-                    <button
-                      id="tab-coplanner"
-                      ref={(el) => { tabRefs.current['coplanner'] = el; }}
-                      onClick={() => setActiveTab('coplanner')}
-                      onKeyDown={(e) => handleTabKeyDown(e, 'coplanner')}
-                      className={`inline-flex items-center gap-2 px-4 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
-                        activeTab === 'coplanner'
-                          ? 'bg-[#3B1F4A] text-white dark:bg-[#F5A623] dark:text-stone-950 shadow-xs'
-                          : 'bg-stone-100 dark:bg-stone-900 text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-200'
-                      }`}
-                      role="tab"
-                      aria-controls="panel-coplanner"
-                      aria-selected={activeTab === 'coplanner'}
-                      tabIndex={activeTab === 'coplanner' ? 0 : -1}
-                    >
-                      <Bot className="w-4 h-4" />
-                      <span>Co-planner</span>
-                    </button>
                   </div>
                 </div>
 
@@ -1345,22 +1326,16 @@ export default function App() {
                   </div>
                 )}
 
-                {activeTab === 'coplanner' && (
-                  <div
-                    role="tabpanel"
-                    id="panel-coplanner"
-                    aria-labelledby="tab-coplanner"
-                    tabIndex={0}
-                    className="focus:outline-none"
-                  >
-                    <CoPlannerPanel plan={plan} onApply={handleApplyCoPlannerChange} />
-                  </div>
-                )}
-
                 <PrintPlanView plan={plan} />
               </div>
             )}
           </div>
+
+          {plan && (
+            <aside className="lg:col-span-3 no-print lg:sticky lg:top-6" aria-label="Co-planner sidebar">
+              <CoPlannerPanel plan={plan} onApply={handleApplyCoPlannerChange} />
+            </aside>
+          )}
         </div>
       </main>
 
