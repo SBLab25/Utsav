@@ -1,0 +1,93 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { GoogleGenAI, ThinkingLevel } from '@google/genai';
+import { geminiResponseSchema, SYSTEM_INSTRUCTION } from './prompts.ts';
+import { eventPlanSchema, type EventPlan } from '../src/schemas/plan.ts';
+
+export const GEMINI_TIMEOUT_MS = parseInt(process.env.GEMINI_TIMEOUT_MS || '25000', 10);
+export const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+
+let mockGenAIClient: any = undefined;
+
+export function setCustomGenAIClient(client: any) {
+  mockGenAIClient = client;
+}
+
+export function resetCustomGenAIClient() {
+  mockGenAIClient = undefined;
+}
+
+export function getGenAIClient(): GoogleGenAI | null {
+  if (mockGenAIClient !== undefined) {
+    return mockGenAIClient;
+  }
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
+    return null;
+  }
+  return new GoogleGenAI({
+    apiKey,
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build',
+      },
+    },
+  });
+}
+
+export type GeminiCallResult =
+  | { success: true; plan: EventPlan }
+  | { success: false; reason: 'timeout' | 'validation-failed' | 'error' };
+
+export async function callGeminiAndValidate(
+  ai: any,
+  prompt: string,
+  timeoutMs: number = GEMINI_TIMEOUT_MS
+): Promise<GeminiCallResult> {
+  try {
+    const modelToUse = process.env.GEMINI_MODEL || GEMINI_MODEL;
+    const geminiCall = ai.models.generateContent({
+      model: modelToUse,
+      contents: prompt,
+      config: {
+        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+        systemInstruction: SYSTEM_INSTRUCTION,
+        responseMimeType: 'application/json',
+        responseSchema: geminiResponseSchema,
+      },
+    });
+
+    const timeoutPromise = new Promise<'TIMEOUT'>((resolve) =>
+      setTimeout(() => resolve('TIMEOUT'), timeoutMs)
+    );
+
+    const raceResult = await Promise.race([geminiCall, timeoutPromise]);
+    if (raceResult === 'TIMEOUT') {
+      return { success: false, reason: 'timeout' };
+    }
+
+    const text = raceResult.text;
+    if (!text) {
+      return { success: false, reason: 'error' };
+    }
+
+    let parsed: any;
+    try {
+      parsed = JSON.parse(text);
+    } catch (_parseErr) {
+      return { success: false, reason: 'validation-failed' };
+    }
+
+    const validation = eventPlanSchema.safeParse(parsed);
+    if (validation.success) {
+      return { success: true, plan: validation.data };
+    }
+
+    return { success: false, reason: 'validation-failed' };
+  } catch (_err) {
+    return { success: false, reason: 'error' };
+  }
+}

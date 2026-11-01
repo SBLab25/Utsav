@@ -152,9 +152,11 @@ export const IdeasTab: React.FC<IdeasTabProps> = ({ ideas, eventTitle, onUpdateI
         </div>
 
         {/* Filter Bar with Favorites Button */}
-        <div className="flex flex-wrap items-center gap-1.5 pt-1" role="tablist" aria-label="Filter ideas by category">
+        <div className="flex flex-wrap items-center gap-1.5 pt-1" role="group" aria-label="Filter ideas by category">
           <button
+            type="button"
             onClick={() => setSelectedFilter('all')}
+            aria-pressed={selectedFilter === 'all'}
             className={`px-3 py-1.5 text-xs font-medium rounded-xl transition-colors cursor-pointer ${
               selectedFilter === 'all'
                 ? 'bg-[#3B1F4A] text-white dark:bg-[#F5A623] dark:text-stone-950 font-semibold'
@@ -165,11 +167,13 @@ export const IdeasTab: React.FC<IdeasTabProps> = ({ ideas, eventTitle, onUpdateI
           </button>
 
           <button
+            type="button"
             onClick={() => setSelectedFilter('favorites')}
+            aria-pressed={selectedFilter === 'favorites'}
             className={`inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-xl transition-colors cursor-pointer ${
               selectedFilter === 'favorites'
-                ? 'bg-[#F5A623] text-stone-950 font-semibold shadow-xs'
-                : 'bg-amber-500/10 text-[#D97706] dark:text-[#F5A623] hover:bg-amber-500/20'
+                ? 'bg-[#B45309] text-white dark:bg-[#F5A623] dark:text-stone-950 font-semibold shadow-xs'
+                : 'bg-amber-500/10 text-[#B45309] dark:text-[#F5A623] hover:bg-amber-500/20'
             }`}
           >
             <Star className={`w-3.5 h-3.5 ${favoritedCount > 0 ? 'fill-current' : ''}`} />
@@ -179,7 +183,9 @@ export const IdeasTab: React.FC<IdeasTabProps> = ({ ideas, eventTitle, onUpdateI
           {categories.map((cat) => (
             <button
               key={cat}
+              type="button"
               onClick={() => setSelectedFilter(cat)}
+              aria-pressed={selectedFilter === cat}
               className={`px-3 py-1.5 text-xs font-medium rounded-xl capitalize transition-colors cursor-pointer ${
                 selectedFilter === cat
                   ? 'bg-[#3B1F4A] text-white dark:bg-[#F5A623] dark:text-stone-950 font-semibold'

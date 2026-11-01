@@ -223,6 +223,10 @@ export const BudgetTab: React.FC<BudgetTabProps> = ({
             onChange={(e) => handleTotalBudgetChange(Number(e.target.value))}
             className="w-full h-2 bg-stone-200 dark:bg-stone-700 rounded-lg appearance-none cursor-pointer accent-[#F5A623]"
             aria-label="Adjust total celebration budget"
+            aria-valuenow={totalBudget}
+            aria-valuemin={Math.max(50000, Math.round(totalBudget * 0.4))}
+            aria-valuemax={Math.round(totalBudget * 2.2)}
+            aria-valuetext={formatINR(totalBudget)}
           />
           <div className="flex justify-between text-[11px] text-stone-400 dark:text-stone-500 mt-1">
             <span>Min: {formatINR(Math.max(50000, Math.round(totalBudget * 0.4)), true)}</span>
@@ -276,6 +280,7 @@ export const BudgetTab: React.FC<BudgetTabProps> = ({
                       <td className="py-3 px-4 text-center">
                         <button
                           onClick={() => handleToggleLock(item.category)}
+                          aria-pressed={item.locked}
                           className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium cursor-pointer transition-colors ${
                             item.locked
                               ? 'bg-[#3B1F4A] text-white dark:bg-[#F5A623] dark:text-stone-950'
@@ -391,6 +396,7 @@ export const BudgetTab: React.FC<BudgetTabProps> = ({
 
                       <button
                         onClick={() => handleToggleLock(item.category)}
+                        aria-pressed={item.locked}
                         className={`p-2 rounded-lg transition-colors cursor-pointer ${
                           item.locked
                             ? 'bg-[#3B1F4A] text-[#F5A623] dark:bg-[#F5A623] dark:text-stone-950'

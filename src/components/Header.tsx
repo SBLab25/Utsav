@@ -113,17 +113,17 @@ export const Header: React.FC<HeaderProps> = ({
         {plan && (
           <div className="hidden lg:flex items-center gap-3 text-xs text-stone-600 dark:text-stone-300 font-medium truncate">
             <span className="flex items-center gap-1.5 shrink-0">
-              <Calendar className="w-3.5 h-3.5 text-[#F5A623]" />
+              <Calendar className="w-3.5 h-3.5 text-[#B45309] dark:text-[#F5A623]" />
               <span className="font-mono">{plan.event_date}</span>
             </span>
             <span className="text-stone-300 dark:text-stone-700" aria-hidden="true">·</span>
             <span className="flex items-center gap-1.5 shrink-0">
-              <Users className="w-3.5 h-3.5 text-[#F5A623]" />
+              <Users className="w-3.5 h-3.5 text-[#B45309] dark:text-[#F5A623]" />
               <span className="font-mono">{plan.guests} guests</span>
             </span>
             <span className="text-stone-300 dark:text-stone-700" aria-hidden="true">·</span>
             <span className="flex items-center gap-1.5 shrink-0">
-              <MapPin className="w-3.5 h-3.5 text-[#F5A623]" />
+              <MapPin className="w-3.5 h-3.5 text-[#B45309] dark:text-[#F5A623]" />
               <span>{plan.city}</span>
             </span>
             <span className="text-stone-300 dark:text-stone-700" aria-hidden="true">·</span>
@@ -155,7 +155,7 @@ export const Header: React.FC<HeaderProps> = ({
                 title="Export entire plan as JSON file"
                 aria-label="Export plan as JSON file"
               >
-                <Download className="w-3.5 h-3.5 text-[#F5A623]" />
+                <Download className="w-3.5 h-3.5 text-[#B45309] dark:text-[#F5A623]" />
                 <span>JSON</span>
               </button>
 
@@ -177,7 +177,7 @@ export const Header: React.FC<HeaderProps> = ({
                 title="View undo and version history"
                 aria-label={`Version history, ${historyCount} versions available`}
               >
-                <History className="w-3.5 h-3.5 text-[#F5A623]" />
+                <History className="w-3.5 h-3.5 text-[#B45309] dark:text-[#F5A623]" />
                 <span className="hidden md:inline">History</span>
                 {historyCount > 0 && (
                   <span className="w-4 h-4 rounded-full bg-[#3B1F4A] text-white dark:bg-[#F5A623] dark:text-stone-950 text-[10px] flex items-center justify-center font-bold">
@@ -195,6 +195,7 @@ export const Header: React.FC<HeaderProps> = ({
                     onChange={handleFileUpload}
                     accept=".json"
                     className="hidden"
+                    aria-label="Upload JSON plan file"
                   />
                   <button
                     onClick={() => fileInputRef.current?.click()}

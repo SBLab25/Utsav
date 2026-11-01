@@ -126,7 +126,7 @@ export const TimelineTab: React.FC<TimelineTabProps> = ({
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-white/80 dark:bg-[#23152C]/90 p-4 rounded-2xl border border-stone-200/80 dark:border-stone-800 shadow-xs">
         <div className="flex flex-wrap items-center gap-2">
           {/* Segmented Filter Control */}
-          <div className="flex items-center gap-1 p-1 bg-stone-100 dark:bg-stone-900 rounded-xl" role="tablist" aria-label="Filter tasks">
+          <div className="flex items-center gap-1 p-1 bg-stone-100 dark:bg-stone-900 rounded-xl" role="group" aria-label="Filter tasks">
             <button
               onClick={() => setFilter('all')}
               className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors cursor-pointer ${
